@@ -72,7 +72,7 @@ y <- X %*% true_coef + rnorm(n, 0, 1.0)
 
 # Create covariate structure information for SAEnet
 # This is where we explicitly inform the model about the covariate
-structure_info_covariate <- list(covariate = matrix(z_covariate, ncol = 1))
+structure_info_covariate <- list(covariate = cbind(z_covariate,z_covariate^2))
 
 # Fit models for comparison
 # 1. Standard Elastic Net (no structure)
@@ -127,6 +127,172 @@ cat(sprintf("  False Positives: %d (%.1f%%)\n",
 # 2. The covariate-based approach significantly improves true positive rates,
 #    especially in higher-value covariate ranges where signals are more likely
 # 3. The covariate-based approach maintains similar control of false positives
+```
+
+```
+# Simulation example with three groups having distinct sparsity levels
+set.seed(456)
+n <- 120       # Number of samples
+p_group1 <- 50 # Variables in group 1
+p_group2 <- 300 # Variables in group 2
+p_group3 <- 40 # Variables in group 3
+p <- p_group1 + p_group2 + p_group3  # Total variables (120)
+
+# Create group structure
+group_membership <- c(rep(1, p_group1), rep(2, p_group2), rep(3, p_group3))
+
+# Define sparsity levels for each group
+sparsity_group1 <- 0.4  # 40% of variables in group 1 are active
+sparsity_group2 <- 0.0  # No active variables in group 2
+sparsity_group3 <- 0.9  # 90% of variables in group 3 are active
+
+# Generate X matrix with correlations within groups
+X <- matrix(0, n, p)
+colnames(X) <- paste0("X", 1:p)
+
+# Generate data with correlation within groups
+# Group-specific correlation matrices
+rho1 <- 0.3  # Moderate correlation in group 1
+rho2 <- 0.5  # Stronger correlation in group 2
+rho3 <- 0.4  # Moderate correlation in group 3
+
+# Function to generate correlated data for a group
+generate_group_data <- function(n_samples, n_vars, rho) {
+  if (n_vars == 1) return(matrix(rnorm(n_samples), ncol = 1))
+  
+  # Create correlation matrix
+  cor_matrix <- matrix(rho, nrow = n_vars, ncol = n_vars)
+  diag(cor_matrix) <- 1
+  
+  # Cholesky decomposition
+  chol_matrix <- chol(cor_matrix)
+  
+  # Generate data
+  Z <- matrix(rnorm(n_samples * n_vars), nrow = n_samples)
+  return(Z %*% chol_matrix)
+}
+
+# Generate group-specific data
+X[, group_membership == 1] <- generate_group_data(n, p_group1, rho1)
+X[, group_membership == 2] <- generate_group_data(n, p_group2, rho2)
+X[, group_membership == 3] <- generate_group_data(n, p_group3, rho3)
+
+# Generate true coefficients with specified sparsity patterns
+beta_true <- rep(0, p)
+
+# Uniform signal strength for all active variables
+signal_strength <- 0.3
+
+# Group 1: 40% active
+active_indices_g1 <- sample(which(group_membership == 1), 
+                            round(p_group1 * sparsity_group1))
+beta_true[active_indices_g1] <- signal_strength
+
+# Group 2: All zeros (0% active)
+# No action needed
+
+# Group 3: 90% active
+active_indices_g3 <- sample(which(group_membership == 3), 
+                            round(p_group3 * sparsity_group3))
+beta_true[active_indices_g3] <- signal_strength
+
+# Generate response with moderate noise
+sigma <- 1.2  # Noise level
+y <- X %*% beta_true + rnorm(n, 0, sigma)
+
+# Create structure information for SAEnet
+structure_info <- list(group = group_membership)
+
+# Fit models for comparison
+# 1. Standard Elastic Net (no group structure)
+fit_std <- saenet(y = y, x = X, 
+                 lambda_selection_rule = "bic", 
+                 max_iterations = 5)
+
+# 2. SAEnet with group structure
+fit_group <- saenet(y = y, x = X, 
+                   lambda_selection_rule = "bic",
+                   structure_info = structure_info,
+                   max_iterations = 5)
+
+# Compare overall results
+# Get coefficient estimates
+beta_std <- predict(fit_std, type = "coefficients")
+beta_group <- predict(fit_group, type = "coefficients")
+
+# Calculate performance metrics
+tp_std <- sum(abs(beta_std) > 1e-8 & beta_true != 0)
+tp_group <- sum(abs(beta_group) > 1e-8 & beta_true != 0)
+
+fp_std <- sum(abs(beta_std) > 1e-8 & beta_true == 0)
+fp_group <- sum(abs(beta_group) > 1e-8 & beta_true == 0)
+
+# Display overall results
+cat("Overall Results:\n")
+cat(sprintf("True model: %d non-zero coefficients (%.1f%%)\n", 
+            sum(beta_true != 0), 100*sum(beta_true != 0)/p))
+
+cat(sprintf("\nStandard Elastic Net:\n"))
+cat(sprintf("  BIC = %.2f\n", tail(fit_std$criterion_value, 1)))
+cat(sprintf("  True Positives: %d/%d (%.1f%%)\n", 
+            tp_std, sum(beta_true != 0), 100*tp_std/sum(beta_true != 0)))
+cat(sprintf("  False Positives: %d/%d (%.1f%%)\n", 
+            fp_std, sum(beta_true == 0), 100*fp_std/sum(beta_true == 0)))
+
+cat(sprintf("\nSAEnet with Group Structure:\n"))
+cat(sprintf("  BIC = %.2f\n", tail(fit_group$criterion_value, 1)))
+cat(sprintf("  True Positives: %d/%d (%.1f%%)\n", 
+            tp_group, sum(beta_true != 0), 100*tp_group/sum(beta_true != 0)))
+cat(sprintf("  False Positives: %d/%d (%.1f%%)\n", 
+            fp_group, sum(beta_true == 0), 100*fp_group/sum(beta_true == 0)))
+
+# Group-level analysis
+group_analysis <- data.frame(
+  Group = c(1, 2, 3),
+  Size = c(p_group1, p_group2, p_group3),
+  TrueSparsity = c(sparsity_group1, sparsity_group2, sparsity_group3) * 100,
+  TrueNonZero = c(
+    sum(beta_true[group_membership == 1] != 0),
+    sum(beta_true[group_membership == 2] != 0),
+    sum(beta_true[group_membership == 3] != 0)
+  )
+)
+
+# Calculate TP and FP rates by group
+for (g in 1:3) {
+  group_indices <- which(group_membership == g)
+  true_nonzero <- beta_true[group_indices] != 0
+  true_zero <- beta_true[group_indices] == 0
+  
+  # Standard model
+  std_nonzero <- abs(beta_std[group_indices]) > 1e-8
+  
+  # Group model
+  group_nonzero <- abs(beta_group[group_indices]) > 1e-8
+  
+  # True positive rates
+  if (sum(true_nonzero) > 0) {
+    group_analysis$StdTPRate[g] <- 100 * sum(std_nonzero & true_nonzero) / sum(true_nonzero)
+    group_analysis$GroupTPRate[g] <- 100 * sum(group_nonzero & true_nonzero) / sum(true_nonzero)
+  } else {
+    group_analysis$StdTPRate[g] <- NA
+    group_analysis$GroupTPRate[g] <- NA
+  }
+  
+  # False positive rates
+  if (sum(true_zero) > 0) {
+    group_analysis$StdFPRate[g] <- 100 * sum(std_nonzero & true_zero) / sum(true_zero)
+    group_analysis$GroupFPRate[g] <- 100 * sum(group_nonzero & true_zero) / sum(true_zero)
+  } else {
+    group_analysis$StdFPRate[g] <- NA
+    group_analysis$GroupFPRate[g] <- NA
+  }
+}
+
+# Display group-level results
+cat("\nGroup-Level Analysis:\n")
+print(group_analysis[, c("Group", "Size", "TrueSparsity", "TrueNonZero", 
+                         "StdTPRate", "GroupTPRate", "StdFPRate", "GroupFPRate")])
 ```
 
 ### Comparing Selection Criteria: BIC vs Cross-Validation
