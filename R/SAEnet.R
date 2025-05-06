@@ -35,8 +35,15 @@
 #' @param alpha_sequence A sequence of elastic net mixing parameters (0 <= alpha <= 1) to try,
 #'        where alpha=1 is lasso and alpha=0 is ridge (default: seq(0, 1, by = 0.1))
 #' @param nlambda Number of lambda values to generate in the sequence (default: 100)
-#' @param lambda_min_ratio Ratio of smallest to largest lambda value in the sequence
-#'        (default: 1e-4 for n >= p, 0.01 for n < p)
+#' @param lambda_min_ratio Ratio of smallest to largest lambda value in the sequence.
+#'        If NULL, defaults to 1e-4 for n >= p, and 0.01 for n < p (default: NULL).
+#' @param lambda_selection_rule Character string specifying the rule for selecting the optimal lambda from
+#'        cross-validation. Options are:
+#'        \itemize{
+#'          \item `"lambda.min"`: (Default) The lambda that gives the minimum mean cross-validated error.
+#'          \item `"lambda.1se"`: The largest lambda such that the cross-validated error is within one
+#'                standard error of the minimum. This typically results in a more parsimonious model.
+#'        }
 #' @param gamma_sequence A sequence of power parameters for adaptive weights
 #'        (default: seq(0.1, 1, by = 0.1))
 #' @param num_folds Number of folds for cross-validation (default: 10)
@@ -47,663 +54,623 @@
 #'   \itemize{
 #'     \item intercept: Vector of estimated intercept values for each iteration
 #'     \item coefficients: Matrix of estimated coefficient vectors (on original scale)
-#'          with columns corresponding to iterations
+#'           with columns corresponding to iterations
 #'     \item weights: Matrix of adaptive weights for each iteration
 #'     \item cv_errors: Vector of cross-validation errors for each iteration
+#'           (corresponding to the selected lambda based on `lambda_selection_rule`)
 #'     \item lambda: Vector of selected lambda parameters for each iteration
 #'     \item alpha: Vector of selected alpha parameters for each iteration
 #'     \item gamma: Vector of selected gamma parameters for each iteration
 #'     \item num_iterations: Number of iterations performed
 #'     \item feature_scaling: Scaling information for predictors (if standardize=TRUE)
+#'     \item lambda_selection_rule: The rule used for lambda selection.
 #'   }
 #'
 #' @references
 #' Pramanik, S., & Zhang, X. (2020). Structure Adaptive Elastic-Net. arXiv:2006.02041.
 #'
 #' @examples
-#' # Example 1: Standard Adaptive Elastic Net (No Structure)
+#' # Generate common example data
 #' set.seed(123)
 #' n <- 100  # number of observations
-#' p <- 200  # number of variables
-#' X <- matrix(rnorm(n * p), n, p)
-#' beta_true <- c(rep(1, 10), rep(0, p - 10))
-#' y <- X %*% beta_true + rnorm(n, 0, 0.5)
+#' p <- 50   # number of variables
+#' X_data <- matrix(rnorm(n * p), n, p)
+#' colnames(X_data) <- paste0("V", 1:p)
+#' # True beta: first 5 are strong, next 5 are moderate, rest are zero
+#' true_beta <- c(rep(1.5, 5), rep(0.3, 5), rep(0, p - 10))
+#' y_data <- X_data %*% true_beta + rnorm(n, 0, 0.75) # Slightly more noise
 #'
-#' # Fit the model
-#' fit <- saenet(y = y, x = X, max_iterations = 3, num_folds = 5)
+#' # --- Demonstrating the benefit of structure (using BIC for selection) ---
+#' message("--- Comparing Models (BIC selection, max_iter=3, num_folds=3 for CV parts if any) ---")
 #'
-#' # View model summary
-#' print(fit)
+#' # 1. Standard SAEnet (No Structure)
+#' fit_no_structure_bic <- saenet(y = y_data, x = X_data, max_iterations = 3,
+#'                                lambda_selection_rule = "bic",
+#'                                num_cores = 1, verbose = FALSE, num_folds = 3)
+#' nz_no_structure <- sum(abs(predict(fit_no_structure_bic, type = "coefficients")) > 1e-8)
+#' crit_no_structure <- tail(fit_no_structure_bic$criterion_value, 1)
+#' message(sprintf("No Structure (BIC): Non-zero coefs = %d, Final BIC = %.2f",
+#'                 nz_no_structure, crit_no_structure))
 #'
-#' # Extract coefficients from the final iteration
-#' beta_est <- predict(fit, type = "coefficients")
+#' # 2. Group-based Structure
+#' # Define groups: first 10 variables (true signals) in one group, rest in another
+#' groups_meaningful <- c(rep(1, 10), rep(2, p - 10))
+#' structure_group_meaningful <- list(group = groups_meaningful)
+#' fit_group_bic <- saenet(y = y_data, x = X_data,
+#'                         structure_info = structure_group_meaningful,
+#'                         max_iterations = 3, lambda_selection_rule = "bic",
+#'                         num_cores = 1, verbose = FALSE, num_folds = 3)
+#' nz_group <- sum(abs(predict(fit_group_bic, type = "coefficients")) > 1e-8)
+#' crit_group <- tail(fit_group_bic$criterion_value, 1)
+#' message(sprintf("Group Structure (BIC): Non-zero coefs = %d, Final BIC = %.2f",
+#'                 nz_group, crit_group))
 #'
-#' # Make predictions for new data
-#' predictions <- predict(fit, newx = X)
-#'
-#' # Plot non-zero coefficients
-#' plot(fit, type = "coefficients")
-#'
-#' # Plot CV error across iterations
-#' plot(fit, type = "cv.error")
-#'
-#' # Example 2: Group-based Structure
-#' # Create arbitrary groups for variables (10 groups of 20 variables each)
-#' groups <- rep(1:10, each = 20)
-#' structure_info <- list(group = groups)
-#'
-#' # Fit the model with group structure
-#' fit_group <- saenet(y = y, x = X, structure_info = structure_info,
-#'                     max_iterations = 3, num_folds = 5)
-#'
-#' # Plot non-zero coefficients
-#' plot(fit_group, type = "coefficients")
-#'
-#' # Example 3: Covariate-dependent Structure
-#' # Create arbitrary covariate related to variable importance
-#' # (higher values for more important variables)
-#' covariate <- runif(p)
-#' covariate[1:10] <- covariate[1:10] + 0.5  # make important variables have higher values
-#' structure_info <- list(covariate = matrix(covariate, ncol = 1))
-#'
-#' # Fit the model with covariate structure
-#' fit_covariate <- saenet(y = y, x = X, structure_info = structure_info,
-#'                         max_iterations = 3, num_folds = 5)
-#'
-#' # Plot non-zero coefficients
-#' plot(fit_covariate, type = "coefficients")
+#' # 3. Covariate-dependent Structure
+#' # Define a covariate: higher values for the first 10 true signal variables
+#' covariate_meaningful <- rep(0.1, p)
+#' covariate_meaningful[1:10] <- 1.0 # Higher value for true signals
+#' covariate_meaningful[6:10] <- 0.7 # Moderately high for moderate signals
+#' structure_cov_meaningful <- list(covariate = matrix(covariate_meaningful, ncol = 1))
+#' fit_covariate_bic <- saenet(y = y_data, x = X_data,
+#'                             structure_info = structure_cov_meaningful,
+#'                             max_iterations = 3, lambda_selection_rule = "bic",
+#'                             num_cores = 1, verbose = FALSE, num_folds = 3)
+#' nz_covariate <- sum(abs(predict(fit_covariate_bic, type = "coefficients")) > 1e-8)
+#' crit_covariate <- tail(fit_covariate_bic$criterion_value, 1)
+#' message(sprintf("Covariate Structure (BIC): Non-zero coefs = %d, Final BIC = %.2f",
+#'                 nz_covariate, crit_covariate))
 #'
 #' @export
 saenet <- function(formula, data, x, y, structure_info, max_iterations = 5,
                    standardize = TRUE, alpha_sequence = seq(0, 1, by = 0.1), nlambda = 100,
-                   lambda_min_ratio = ifelse(nobs < nvars, 0.01, 1e-04), gamma_sequence = seq(0.1, 1, by = 0.1),
+                   lambda_min_ratio = NULL,
+                   lambda_selection_rule = c("lambda.min", "lambda.1se", "bic"), ## --- MODIFIED ---
+                   gamma_sequence = seq(0.1, 1, by = 0.1),
                    num_folds = 10, num_cores = 1, verbose = TRUE) {
 
-  # Load required packages
-  if (!requireNamespace("glmnet", quietly = TRUE)) {
-    stop("Package glmnet is required but not installed")
-  }
-  if (!requireNamespace("foreach", quietly = TRUE)) {
-    stop("Package foreach is required but not installed")
-  }
-  if (!requireNamespace("doParallel", quietly = TRUE)) {
-    stop("Package doParallel is required but not installed")
-  }
+  lambda_selection_rule <- match.arg(lambda_selection_rule) ## --- MODIFIED ---
 
-  # Check if formula or x,y interface is used
+  if (!requireNamespace("glmnet", quietly = TRUE)) stop("Package glmnet is required.")
+  if (!requireNamespace("foreach", quietly = TRUE)) stop("Package foreach is required.")
+  if (!requireNamespace("doParallel", quietly = TRUE)) stop("Package doParallel is required.")
+  if (num_cores > 1 && !requireNamespace("parallel", quietly = TRUE)) stop("Package parallel is required for num_cores > 1.")
+
   if (!missing(formula)) {
-    # Formula interface
-    if (missing(data)) {
-      data <- environment(formula)
-    }
-    model_frame <- model.frame(formula, data)
-    y <- model.response(model_frame, "numeric")
-    X <- model.matrix(formula, model_frame)[, -1, drop = FALSE]  # Remove intercept column
+    if (missing(data)) data <- environment(formula)
+    model_frame <- stats::model.frame(formula, data)
+    y_response <- stats::model.response(model_frame, "numeric")
+    X_matrix <- stats::model.matrix(formula, model_frame)[, -1, drop = FALSE]
   } else if (!missing(x) && !missing(y)) {
-    # x,y interface
-    X <- as.matrix(x)
-    y <- as.numeric(y)
+    X_matrix <- as.matrix(x)
+    y_response <- as.numeric(y)
   } else {
     stop("Either 'formula' and 'data' or 'x' and 'y' must be provided")
   }
 
-  # Validate input dimensions
-  n_rows_X <- nrow(X)
-  n_length_y <- length(y)
+  n_rows_X <- nrow(X_matrix)
+  n_length_y <- length(y_response)
+  if (n_rows_X != n_length_y) stop("Number of observations from y and X do not match.")
+  nobs <- n_length_y
 
-  if (n_rows_X != n_length_y) {
-    stop("Number of observations from y and X should match. The length of y and the number of rows in X do not match!")
-  } else {
-    nobs <- n_length_y
+  if (missing(num_cores) || is.null(num_cores) || num_cores < 1) num_cores <- 1
+  nvars <- ncol(X_matrix)
+  if(nvars == 0) stop("The design matrix X has 0 columns (predictors).")
+
+  if (is.null(lambda_min_ratio)) {
+    lambda_min_ratio <- ifelse(nobs < nvars, 0.01, 1e-04)
   }
 
-  # Handle optional parameters
-  if (missing(num_cores)) num_cores <- 1
-
-  # Number of predictor variables
-  nvars <- ncol(X)
-
-  # Standardize X if requested
   if (standardize) {
-    feature_means <- colMeans(X)
-    feature_sds <- apply(X, 2, sd)
-    feature_sds[feature_sds == 0] <- 1  # Protect against division by zero
-    X_standardized <- scale(X, center = feature_means, scale = feature_sds)
+    feature_means <- colMeans(X_matrix, na.rm = TRUE)
+    feature_sds <- apply(X_matrix, 2, stats::sd, na.rm = TRUE)
+    if(any(feature_sds == 0, na.rm = TRUE)) {
+      if(verbose) message("Some predictors have zero standard deviation. They will not be scaled.")
+      feature_sds[feature_sds == 0] <- 1
+    }
+    X_standardized <- scale(X_matrix, center = feature_means, scale = feature_sds)
   } else {
-    X_standardized <- X
+    X_standardized <- X_matrix
+    feature_means <- rep(0, nvars)
+    feature_sds <- rep(1, nvars)
   }
 
-  # Initialize storage for outputs
-  coef_std_matrix <- weights_matrix <- matrix(nrow = nvars, ncol = 1 + max_iterations)
-  intercept_std_vector <- cv_error_vector <- lambda_vector <- alpha_vector <- gamma_vector <- rep(NA, 1 + max_iterations)
-
-  # Use the unified fitting function
   fit_results <- fit_adaptive_net(
-    y = y,
+    y = y_response,
     X_std = X_standardized,
     structure_info = if(missing(structure_info)) NULL else structure_info,
     max_iterations = max_iterations,
-    standardize_X = standardize,
+    standardize_X_glmnet = FALSE, # X_std is already handled
     alpha_sequence = alpha_sequence,
     nlambda = nlambda,
     lambda_min_ratio = lambda_min_ratio,
+    lambda_selection_rule = lambda_selection_rule, ## --- MODIFIED ---
     gamma_sequence = gamma_sequence,
-    num_folds = num_folds,
+    num_folds = num_folds, # Passed even if BIC, for consistency, though not used by BIC path
     num_cores = num_cores,
     verbose = verbose,
-    nvars = nvars
+    nvars = nvars,
+    nobs = nobs ## +++ ADDED +++ (nobs needed for BIC)
   )
 
-  # Extract results
   coef_std_matrix <- fit_results$coef_std_matrix
   intercept_std_vector <- fit_results$intercept_std_vector
   weights_matrix <- fit_results$weights_matrix
-  cv_error_vector <- fit_results$cv_error_vector
+  criterion_value_vector <- fit_results$criterion_value_vector ## --- MODIFIED --- (was cv_error_vector)
   lambda_vector <- fit_results$lambda_vector
   alpha_vector <- fit_results$alpha_vector
   gamma_vector <- fit_results$gamma_vector
 
-  # Transform coefficients back to original scale if standardized
+  coef_matrix <- matrix(NA, nrow = nvars, ncol = ncol(coef_std_matrix))
+  intercept_final_vector <- intercept_std_vector
+
   if (standardize) {
-    # Back-transformation formula: beta_orig = beta_std / scale
-    coef_matrix <- matrix(NA, nrow = nvars, ncol = ncol(coef_std_matrix))
     for (j in 1:ncol(coef_std_matrix)) {
       coef_matrix[, j] <- coef_std_matrix[, j] / feature_sds
-      intercept_std_vector[j] <- intercept_std_vector[j] - sum(feature_means * coef_matrix[, j])
+      intercept_final_vector[j] <- intercept_std_vector[j] - sum(coef_std_matrix[, j] * feature_means / feature_sds)
     }
   } else {
     coef_matrix <- coef_std_matrix
+    intercept_final_vector <- intercept_std_vector
   }
 
-  # Add variable names to coefficients if available
-  if (!is.null(colnames(X))) {
-    rownames(coef_matrix) <- colnames(X)
-    rownames(coef_std_matrix) <- colnames(X)
+  if (!is.null(colnames(X_matrix))) {
+    rownames(coef_matrix) <- colnames(X_matrix)
   }
 
-  # Construct and return the result
   result <- list(
-    'intercept' = intercept_std_vector,
+    'intercept' = intercept_final_vector,
     'coefficients' = as.matrix(coef_matrix),
     'weights' = weights_matrix,
-    'cv_errors' = cv_error_vector,
+    'criterion_value' = criterion_value_vector, ## --- MODIFIED ---
     'lambda' = lambda_vector,
     'alpha' = alpha_vector,
     'gamma' = gamma_vector,
-    'num_iterations' = max_iterations
+    'num_iterations' = max_iterations,
+    'lambda_selection_rule' = lambda_selection_rule
   )
 
-  # Add scaling information if standardization was used
   if (standardize) {
-    result$feature_scaling <- list(
-      center = feature_means,
-      scale = feature_sds
-    )
+    result$feature_scaling <- list(center = feature_means, scale = feature_sds)
   }
-
-  # Add additional class information
   class(result) <- c("saenet", "list")
-
   return(result)
 }
 
-#' Fit Structure-Adaptive Elastic Net model
-#'
-#' @description
-#' Internal function that implements the core fitting algorithm for SAEnet models.
+#' Fit Structure-Adaptive Elastic Net model (Internal)
 #'
 #' @param y Response vector
 #' @param X_std Standardized design matrix
-#' @param structure_info External structural information (NULL, group-based, or covariate-based)
+#' @param structure_info External structural information
 #' @param max_iterations Maximum number of iterations
-#' @param standardize_X Whether to standardize the predictors
-#' @param alpha_sequence Sequence of alpha values to try
+#' @param standardize_X_glmnet Logical, passed to glmnet's standardize argument.
+#'        Note: X_std is already standardized if saenet's standardize=TRUE.
+#'        This controls glmnet's internal standardization. Usually FALSE if X_std is pre-standardized.
+#' @param alpha_sequence Sequence of alpha values
 #' @param nlambda Number of lambda values
 #' @param lambda_min_ratio Ratio of min to max lambda
-#' @param gamma_sequence Sequence of gamma values to try
+#' @param lambda_selection_rule Rule for lambda selection ("lambda.min" or "lambda.1se")
+#' @param gamma_sequence Sequence of gamma values
 #' @param num_folds Number of cross-validation folds
 #' @param num_cores Number of cores for parallel computation
 #' @param verbose Whether to print progress messages
 #' @param nvars Number of predictor variables
 #'
-#' @return A list with the following components:
-#'   \itemize{
-#'     \item coef_std_matrix: Matrix of coefficient estimates (standardized scale)
-#'     \item intercept_std_vector: Vector of intercept estimates
-#'     \item weights_matrix: Matrix of adaptive weights
-#'     \item cv_error_vector: Vector of cross-validation errors
-#'     \item lambda_vector: Vector of selected lambda values
-#'     \item alpha_vector: Vector of selected alpha values
-#'     \item gamma_vector: Vector of selected gamma values
-#'   }
-#'
+#' @return A list with model fitting results on the standardized scale.
 #' @keywords internal
-fit_adaptive_net <- function(y, X_std, structure_info, max_iterations, standardize_X,
-                             alpha_sequence, nlambda, lambda_min_ratio, gamma_sequence, num_folds,
-                             num_cores, verbose, nvars) {
+fit_adaptive_net <- function(y, X_std, structure_info, max_iterations, standardize_X_glmnet,
+                             alpha_sequence, nlambda, lambda_min_ratio, lambda_selection_rule,
+                             gamma_sequence, num_folds, num_cores, verbose, nvars, nobs) { ## +++ ADDED nobs +++
 
-  # Determine the structure type
   if (is.null(structure_info)) {
     structure_type <- "standard"
   } else if (!is.null(names(structure_info)) && names(structure_info)[1] == 'group') {
     structure_type <- "group"
-    # Extract group information
+    if(is.null(structure_info$group) || length(structure_info$group) != nvars) stop("Group structure: structure_info$group length mismatch.")
     group_ids <- unique(structure_info$group)
     num_groups <- length(group_ids)
     group_indices <- vector(mode = 'list', length = num_groups)
-    for (group_idx in 1:num_groups) {
-      group_indices[[group_idx]] <- which(structure_info$group == group_ids[group_idx])
-    }
+    for (idx in 1:num_groups) group_indices[[idx]] <- which(structure_info$group == group_ids[idx])
   } else if (!is.null(names(structure_info)) && names(structure_info)[1] == 'covariate') {
     structure_type <- "covariate"
-    # Extract and standardize covariate
     covariate <- structure_info$covariate
-    if (!is.matrix(covariate) && !is.data.frame(covariate)) {
-      covariate <- as.matrix(covariate, ncol = 1)
-    }
-    covariate_means <- colMeans(covariate)
-    covariate_sds <- apply(covariate, 2, sd)
+    if (is.null(covariate)) stop("Covariate structure: structure_info$covariate missing.")
+    if (!is.matrix(covariate) && !is.data.frame(covariate)) covariate <- as.matrix(covariate, ncol = 1)
+    if(nrow(covariate) != nvars) stop("Covariate structure: structure_info$covariate row mismatch.")
+    covariate_means <- colMeans(covariate, na.rm = TRUE)
+    covariate_sds <- apply(covariate, 2, stats::sd, na.rm = TRUE)
+    covariate_sds[covariate_sds == 0] <- 1
     covariate_std <- scale(covariate, center = covariate_means, scale = covariate_sds)
   } else {
-    stop("Invalid structure_info. Must be NULL or a list with 'group' or 'covariate' element.")
+    stop("Invalid structure_info.")
   }
 
-  # Storage for outputs
-  coef_std_matrix <- weights_matrix <- matrix(nrow = nvars, ncol = 1 + max_iterations)
-  intercept_std_vector <- cv_error_vector <- lambda_vector <- alpha_vector <- gamma_vector <- rep(NA, 1 + max_iterations)
+  coef_std_matrix <- matrix(0, nrow = nvars, ncol = 1 + max_iterations)
+  weights_matrix <- matrix(1, nrow = nvars, ncol = 1 + max_iterations)
+  intercept_std_vector <- criterion_value_vector <- lambda_vector <- alpha_vector <- gamma_vector <- rep(NA, 1 + max_iterations) ## --- MODIFIED ---
 
-  # Register parallel backend
-  doParallel::registerDoParallel(cores = num_cores)
+  if (num_cores > 1) {
+    cl <- parallel::makeCluster(num_cores)
+    doParallel::registerDoParallel(cl)
+    on.exit(parallel::stopCluster(cl), add = TRUE)
+  } else {
+    foreach::registerDoSEQ()
+  }
 
-  # Implementing Adaptive Enet with adaptive L1 and non-adaptive L2 penalties
   for (iteration in 0:max_iterations) {
-    if (iteration == 0) {
-      # Iteration 0 - Initial fit (same for all structure types)
-      # Perform cross-validation over alpha sequence
-      results <- cv_alpha(X_std, y, standardize_X, alpha_sequence,
-                          nlambda, lambda_min_ratio, num_folds, num_cores)
+    if (verbose && iteration > 0) print(paste('SAEnet Iteration', iteration, 'of', max_iterations))
+    current_iter_penalty_factor <- if (iteration == 0) rep(1, nvars) else weights_matrix[, iteration]
 
-      # Extract the best alpha, lambda and corresponding coefficients
+    if (iteration == 0) {
+      results <- cv_alpha(X_std, y, standardize_X_glmnet = standardize_X_glmnet,
+                          alpha_sequence, nlambda, lambda_min_ratio,
+                          num_folds, num_cores, nobs, ## +++ ADDED nobs +++
+                          penalty_factor = current_iter_penalty_factor,
+                          lambda_selection_rule = lambda_selection_rule)
+
       best_alpha <- results$best_alpha
       best_lambda <- results$best_lambda
+      best_criterion_value <- results$best_criterion_value ## --- MODIFIED ---
 
-      # Fit model with optimal alpha and lambda
-      model_fit <- glmnet::glmnet(
-        x = X_std, y = y,
-        alpha = best_alpha,
-        standardize = standardize_X,
-        lambda = best_lambda
-      )
+      if(is.na(best_lambda) || is.na(best_alpha)) stop("Iteration 0: CV/BIC failed.")
 
+      model_fit <- glmnet::glmnet(x = X_std, y = y, alpha = best_alpha,
+                                  standardize = standardize_X_glmnet, lambda = best_lambda)
       intercept_std_vector[iteration + 1] <- as.numeric(model_fit$a0)
       coef_std_matrix[, iteration + 1] <- as.numeric(as.matrix(model_fit$beta))
-      cv_error_vector[iteration + 1] <- results$best_cv_error
+      criterion_value_vector[iteration + 1] <- best_criterion_value ## --- MODIFIED ---
       lambda_vector[iteration + 1] <- best_lambda
       alpha_vector[iteration + 1] <- best_alpha
-
+      weights_matrix[, iteration + 1] <- current_iter_penalty_factor
     } else {
-      # Iterations 1 to max_iterations - Structure-specific adaptive penalties
-
-      # Calculate initial weights based on structure type
+      prev_coefs_std <- coef_std_matrix[, iteration]
       if (structure_type == "standard") {
-        initial_weights <- calculate_standard_weights(coef_std_matrix[, iteration])
+        initial_weights_for_gamma_opt <- calculate_standard_weights(prev_coefs_std)
       } else if (structure_type == "group") {
-        initial_weights <- calculate_group_weights(coef_std_matrix[, iteration], group_indices, num_groups)
+        initial_weights_for_gamma_opt <- calculate_group_weights(prev_coefs_std, group_indices, num_groups)
       } else if (structure_type == "covariate") {
-        # Handle covariate structure
-        cv_results <- cv_covariate(X_std, y, standardize_X, alpha_sequence,
-                                   nlambda, lambda_min_ratio, gamma_sequence,
-                                   coef_std_matrix[, iteration],
-                                   covariate_std, nvars, num_folds,
-                                   num_cores)
-
-        optimal_weights <- pmin(exp(cv_results$optimal_tau_params[1] +
-                                      covariate_std%*%cv_results$optimal_tau_params[-1]),
-                                1e+100)
-
-        # Fit model with optimal weights
-        model_fit <- glmnet::glmnet(
-          x = X_std, y = y,
-          alpha = cv_results$best_alpha,
-          standardize = standardize_X,
-          penalty.factor = optimal_weights,
-          lambda = cv_results$best_lambda
-        )
-
+        cv_results_cov <- cv_covariate(X_std, y, standardize_X_glmnet = standardize_X_glmnet,
+                                       alpha_sequence, nlambda, lambda_min_ratio,
+                                       lambda_selection_rule, gamma_sequence, prev_coefs_std,
+                                       covariate_std, nvars, num_folds, num_cores, nobs, verbose) ## +++ ADDED nobs +++
+        final_penalty_factor_for_iter <- cv_results_cov$optimal_weights_for_glmnet
+        model_fit <- glmnet::glmnet(x = X_std, y = y, alpha = cv_results_cov$best_alpha,
+                                    standardize = standardize_X_glmnet,
+                                    penalty.factor = final_penalty_factor_for_iter,
+                                    lambda = cv_results_cov$best_lambda)
         intercept_std_vector[iteration + 1] <- as.numeric(model_fit$a0)
         coef_std_matrix[, iteration + 1] <- as.numeric(as.matrix(model_fit$beta))
-        weights_matrix[, iteration + 1] <- optimal_weights
-        cv_error_vector[iteration + 1] <- cv_results$best_cv_error
-        lambda_vector[iteration + 1] <- cv_results$best_lambda
-        gamma_vector[iteration + 1] <- cv_results$best_gamma
-        alpha_vector[iteration + 1] <- cv_results$best_alpha
-
-        # Continue to next iteration
-        if (verbose & iteration > 0) print(paste('Iteration', iteration, 'out of', max_iterations))
+        weights_matrix[, iteration + 1] <- final_penalty_factor_for_iter
+        criterion_value_vector[iteration + 1] <- cv_results_cov$best_criterion_value ## --- MODIFIED ---
+        lambda_vector[iteration + 1] <- cv_results_cov$best_lambda
+        gamma_vector[iteration + 1] <- cv_results_cov$best_gamma
+        alpha_vector[iteration + 1] <- cv_results_cov$best_alpha
         next
       }
 
-      # Handle cases where coefficients are all zero or weights are all infinite
-      if (any(sum(coef_std_matrix[, iteration] != 0) == 0, sum(initial_weights != Inf) == 0)) {
+      if (all(prev_coefs_std == 0) || any(!is.finite(initial_weights_for_gamma_opt))) {
+        if(verbose) message(paste("Iter", iteration, ": Prev coefs zero or non-finite weights. Coefs set to zero."))
         coef_std_matrix[, iteration + 1] <- numeric(nvars)
-      } else {
-        # Cross-validation to find optimal parameters (standard and group structures)
-        cv_results <- cv_gamma(X_std, y, standardize_X, alpha_sequence,
-                               nlambda, lambda_min_ratio, gamma_sequence,
-                               initial_weights, num_folds, num_cores)
-
-        optimal_weights <- pmin(initial_weights^cv_results$best_gamma, 1e+100)
-
-        # Fit model with optimal weights
-        model_fit <- glmnet::glmnet(
-          x = X_std, y = y,
-          alpha = cv_results$best_alpha,
-          standardize = standardize_X,
-          penalty.factor = optimal_weights,
-          lambda = cv_results$best_lambda,
-          nlambda = 1
-        )
-
-        intercept_std_vector[iteration + 1] <- as.numeric(model_fit$a0)
-        coef_std_matrix[, iteration + 1] <- as.numeric(as.matrix(model_fit$beta))
-        weights_matrix[, iteration + 1] <- optimal_weights
-        cv_error_vector[iteration + 1] <- cv_results$best_cv_error
-        lambda_vector[iteration + 1] <- cv_results$best_lambda
-        gamma_vector[iteration + 1] <- cv_results$best_gamma
-        alpha_vector[iteration + 1] <- cv_results$best_alpha
+        intercept_std_vector[iteration + 1] <- intercept_std_vector[iteration]
+        weights_matrix[, iteration + 1] <- if(all(prev_coefs_std == 0)) rep(1e6, nvars) else initial_weights_for_gamma_opt
+        criterion_value_vector[iteration + 1] <- criterion_value_vector[iteration] ## --- MODIFIED ---
+        lambda_vector[iteration + 1] <- lambda_vector[iteration]; alpha_vector[iteration + 1] <- alpha_vector[iteration]; gamma_vector[iteration + 1] <- NA
+        next
       }
+
+      cv_results_gamma <- cv_gamma(X_std, y, standardize_X_glmnet = standardize_X_glmnet,
+                                   alpha_sequence, nlambda, lambda_min_ratio,
+                                   lambda_selection_rule, gamma_sequence, initial_weights_for_gamma_opt,
+                                   num_folds, num_cores, nobs, verbose) ## +++ ADDED nobs +++
+      final_penalty_factor_for_iter <- pmin(initial_weights_for_gamma_opt^cv_results_gamma$best_gamma, 1e+12)
+      final_penalty_factor_for_iter[!is.finite(final_penalty_factor_for_iter)] <- 1e+12
+      model_fit <- glmnet::glmnet(x = X_std, y = y, alpha = cv_results_gamma$best_alpha,
+                                  standardize = standardize_X_glmnet,
+                                  penalty.factor = final_penalty_factor_for_iter,
+                                  lambda = cv_results_gamma$best_lambda)
+      intercept_std_vector[iteration + 1] <- as.numeric(model_fit$a0)
+      coef_std_matrix[, iteration + 1] <- as.numeric(as.matrix(model_fit$beta))
+      weights_matrix[, iteration + 1] <- final_penalty_factor_for_iter
+      criterion_value_vector[iteration + 1] <- cv_results_gamma$best_criterion_value ## --- MODIFIED ---
+      lambda_vector[iteration + 1] <- cv_results_gamma$best_lambda
+      gamma_vector[iteration + 1] <- cv_results_gamma$best_gamma
+      alpha_vector[iteration + 1] <- cv_results_gamma$best_alpha
     }
-
-    if (verbose & iteration > 0) print(paste('Iteration', iteration, 'out of', max_iterations))
   }
-
-  return(list(
-    coef_std_matrix = coef_std_matrix,
-    intercept_std_vector = intercept_std_vector,
-    weights_matrix = weights_matrix,
-    cv_error_vector = cv_error_vector,
-    lambda_vector = lambda_vector,
-    alpha_vector = alpha_vector,
-    gamma_vector = gamma_vector
-  ))
+  return(list(coef_std_matrix = coef_std_matrix, intercept_std_vector = intercept_std_vector,
+              weights_matrix = weights_matrix, criterion_value_vector = criterion_value_vector, ## --- MODIFIED ---
+              lambda_vector = lambda_vector, alpha_vector = alpha_vector, gamma_vector = gamma_vector))
 }
+
 
 #' Calculate weights for standard adaptive elastic net
-#'
-#' @param coefficients Current coefficient estimates
-#'
-#' @return Vector of weights (1/|beta|)
-#'
 #' @keywords internal
 calculate_standard_weights <- function(coefficients) {
-  return(1 / abs(coefficients))
-}
-
-#' Calculate weights for group-based adaptive elastic net
-#'
-#' @param coefficients Current coefficient estimates
-#' @param group_indices List of indices for each group
-#' @param num_groups Number of groups
-#'
-#' @return Vector of weights (1/mean(|beta|) within each group)
-#'
-#' @keywords internal
-calculate_group_weights <- function(coefficients, group_indices, num_groups) {
-  weights <- rep(NA, length(coefficients))
-  for (group_idx in 1:num_groups) {
-    group_coefs <- coefficients[group_indices[[group_idx]]]
-    weights[group_indices[[group_idx]]] <- 1 / mean(abs(group_coefs))
-  }
+  weights <- 1 / abs(coefficients)
+  weights[!is.finite(weights)] <- 1e+100 # Replace Inf with a large number
   return(weights)
 }
 
-#' Cross-validation across alpha values
+#' Calculate weights for group-based adaptive elastic net
+#' @keywords internal
+calculate_group_weights <- function(coefficients, group_indices, num_groups) {
+  weights_vec <- rep(NA, length(coefficients))
+  for (group_idx in 1:num_groups) {
+    group_coefs <- coefficients[group_indices[[group_idx]]]
+    mean_abs_coef <- mean(abs(group_coefs), na.rm = TRUE)
+    current_weight <- if (mean_abs_coef == 0) 1e+100 else 1 / mean_abs_coef
+    weights_vec[group_indices[[group_idx]]] <- current_weight
+  }
+  weights_vec[!is.finite(weights_vec)] <- 1e+100 # Ensure finite weights
+  return(weights_vec)
+}
+
+#' Cross-validation across alpha values (Internal)
 #'
 #' @param X_std Standardized design matrix
 #' @param y Response vector
-#' @param standardize_X Whether to standardize the predictors
-#' @param alpha_sequence Sequence of alpha values to try
-#' @param nlambda Number of lambda values
-#' @param lambda_min_ratio Ratio of min to max lambda
-#' @param num_folds Number of cross-validation folds
-#' @param num_cores Number of cores for parallel computation
-#' @param penalty_factor Optional vector of penalty factors
+#' @param standardize_X_glmnet Logical, passed to glmnet's standardize argument.
+#' @param alpha_sequence Sequence of alpha values
+#' @param nlambda Number of lambda values for cv.glmnet
+#' @param lambda_min_ratio Ratio for lambda sequence in cv.glmnet
+#' @param num_folds Number of CV folds
+#' @param num_cores Number of cores
+#' @param penalty_factor Penalty factors for glmnet
+#' @param lambda_selection_rule Rule for lambda selection ("lambda.min" or "lambda.1se")
 #'
-#' @return A list with best CV error, lambda, and alpha
-#'
+#' @return List with best_cv_error, best_lambda, best_alpha.
 #' @keywords internal
-cv_alpha <- function(X_std, y, standardize_X, alpha_sequence,
-                     nlambda, lambda_min_ratio, num_folds, num_cores = 1,
-                     penalty_factor = NULL) {
+cv_alpha <- function(X_std, y, standardize_X_glmnet, alpha_sequence,
+                     nlambda, lambda_min_ratio, num_folds, num_cores, nobs, ## +++ ADDED nobs +++
+                     penalty_factor = NULL, lambda_selection_rule) {
 
   if(is.null(penalty_factor)) penalty_factor <- rep(1, ncol(X_std))
-  # Set up parallel backend
-  doParallel::registerDoParallel(cores = num_cores)
+  penalty_factor[!is.finite(penalty_factor)] <- 1e+12
 
-  # Container for results
-  results <- foreach::foreach(current_alpha = alpha_sequence, .combine = 'rbind', .multicombine = TRUE) %dopar% {
-    cv_model <- glmnet::cv.glmnet(
-      x = X_std, y = y,
-      alpha = current_alpha,
-      standardize = standardize_X,
-      penalty.factor = penalty_factor,
-      nfolds = num_folds,
-      nlambda = nlambda,
-      lambda.min.ratio = lambda_min_ratio
-    )
+  ## --- MODIFIED BLOCK FOR BIC ---
+  results_list <- foreach::foreach(
+    current_alpha_iter = alpha_sequence,
+    .combine = 'rbind', .errorhandling = "pass", .packages = "glmnet"
+  ) %dopar% {
+    criterion_val <- NA
+    selected_lambda_val <- NA
 
-    c(min(cv_model$cvm), cv_model$lambda.min, current_alpha)
+    if (lambda_selection_rule %in% c("lambda.min", "lambda.1se")) {
+      cv_model_fit <- NULL
+      try_result <- try({
+        cv_model_fit <- glmnet::cv.glmnet(x = X_std, y = y, alpha = current_alpha_iter,
+                                          standardize = standardize_X_glmnet,
+                                          penalty.factor = penalty_factor, nfolds = num_folds,
+                                          nlambda = nlambda, lambda.min.ratio = lambda_min_ratio,
+                                          grouped = FALSE)
+      }, silent = TRUE)
+
+      if (inherits(try_result, "try-error") || is.null(cv_model_fit)) {
+        return(c(Inf, NA, current_alpha_iter)) # criterion_val, lambda, alpha
+      }
+
+      if (lambda_selection_rule == "lambda.min") {
+        selected_lambda_val <- cv_model_fit$lambda.min
+        idx_selected <- which(cv_model_fit$lambda == selected_lambda_val)
+        if(length(idx_selected) > 0) criterion_val <- cv_model_fit$cvm[idx_selected[1]]
+      } else { # lambda.1se
+        selected_lambda_val <- cv_model_fit$lambda.1se
+        idx_selected <- which(cv_model_fit$lambda == selected_lambda_val)
+        if(length(idx_selected) > 0) criterion_val <- cv_model_fit$cvm[idx_selected[1]]
+      }
+      if(is.na(selected_lambda_val) || is.na(criterion_val)){ # Fallback if 1se is weird or index fails
+        selected_lambda_val <- cv_model_fit$lambda.min
+        idx_fallback <- which(cv_model_fit$lambda == selected_lambda_val)
+        criterion_val <- if(length(idx_fallback)>0) cv_model_fit$cvm[idx_fallback[1]] else min(cv_model_fit$cvm, na.rm=TRUE)
+      }
+
+    } else if (lambda_selection_rule == "bic") {
+      glm_fit <- NULL
+      try_result_bic <- try({
+        glm_fit <- glmnet::glmnet(x = X_std, y = y, alpha = current_alpha_iter,
+                                  standardize = standardize_X_glmnet,
+                                  penalty.factor = penalty_factor,
+                                  nlambda = nlambda, lambda.min.ratio = lambda_min_ratio)
+      }, silent = TRUE)
+
+      if (inherits(try_result_bic, "try-error") || is.null(glm_fit) || length(glm_fit$lambda) == 0) {
+        return(c(Inf, NA, current_alpha_iter)) # criterion_val (BIC), lambda, alpha
+      }
+
+      # Calculate BIC for each lambda in the path
+      # BIC = deviance + log(nobs) * df
+      # deviance = nulldev * (1 - dev.ratio)
+      deviance_vals <- glm_fit$nulldev * (1 - glm_fit$dev.ratio)
+      df_vals <- glm_fit$df
+      bic_vals <- deviance_vals + log(nobs) * df_vals
+
+      if(all(!is.finite(bic_vals))) { # If all BICs are Inf/NA
+        return(c(Inf, NA, current_alpha_iter))
+      }
+
+      min_bic_idx <- which.min(bic_vals)
+      criterion_val <- bic_vals[min_bic_idx]
+      selected_lambda_val <- glm_fit$lambda[min_bic_idx]
+    } else {
+      stop("Unknown lambda_selection_rule in cv_alpha.")
+    }
+    c(criterion_val, selected_lambda_val, current_alpha_iter)
   }
+  ## --- END MODIFIED BLOCK ---
 
-  # Find best alpha based on CV error
-  best_idx <- which.min(results[, 1])
+  results_df <- as.data.frame(results_list)
+  colnames(results_df) <- c("criterion", "lambda", "alpha")
+  valid_results <- results_df[is.finite(results_df$criterion) & is.finite(results_df$lambda), ]
+
+  if (nrow(valid_results) == 0) {
+    stop(paste0("cv_alpha: Selection rule '", lambda_selection_rule, "' failed for all alpha values."))
+  }
+  best_idx_in_valid <- which.min(valid_results$criterion) # Minimize CV error or BIC
 
   return(list(
-    best_cv_error = results[best_idx, 1],
-    best_lambda = results[best_idx, 2],
-    best_alpha = results[best_idx, 3]
+    best_criterion_value = valid_results$criterion[best_idx_in_valid], ## --- MODIFIED ---
+    best_lambda = valid_results$lambda[best_idx_in_valid],
+    best_alpha = valid_results$alpha[best_idx_in_valid]
   ))
 }
 
-#' Cross-validation to find optimal gamma parameter
-#'
-#' @param X_std Standardized design matrix
-#' @param y Response vector
-#' @param standardize_X Whether to standardize the predictors
-#' @param alpha_sequence Sequence of alpha values to try
-#' @param nlambda Number of lambda values
-#' @param lambda_min_ratio Ratio of min to max lambda
-#' @param gamma_sequence Sequence of gamma values to try
-#' @param initial_weights Initial weights for adaptive penalties
-#' @param num_folds Number of cross-validation folds
-#' @param num_cores Number of cores for parallel computation
-#'
-#' @return A list with best CV error, lambda, alpha, and gamma
-#'
+
+#' Cross-validation to find optimal gamma parameter (Internal)
 #' @keywords internal
-cv_gamma <- function(X_std, y, standardize_X, alpha_sequence, nlambda,
-                     lambda_min_ratio, gamma_sequence,
-                     initial_weights, num_folds, num_cores) {
-
-  # Set up parallel backend
-  doParallel::registerDoParallel(cores = num_cores)
-
-  # Container for results
-  results <- list()
-
-  # For each gamma value
+cv_gamma <- function(X_std, y, standardize_X_glmnet, alpha_sequence, nlambda,
+                     lambda_min_ratio, lambda_selection_rule,
+                     gamma_sequence, initial_weights_for_gamma_opt,
+                     num_folds, num_cores, nobs, verbose) { ## +++ ADDED nobs +++
+  gamma_cv_results_list <- list()
   for (i in seq_along(gamma_sequence)) {
-    gamma <- gamma_sequence[i]
-    adaptive_weights <- pmin(initial_weights^gamma, 1e+100)
+    current_gamma_iter <- gamma_sequence[i]
+    if(verbose > 1) print(paste("  cv_gamma: Testing gamma =", current_gamma_iter))
+    current_penalty_factor_for_alpha_cv <- pmin(initial_weights_for_gamma_opt^current_gamma_iter, 1e+12)
+    current_penalty_factor_for_alpha_cv[!is.finite(current_penalty_factor_for_alpha_cv)] <- 1e+12
 
-    # Cross-validation across alpha values for the current gamma
-    cv_results <- cv_alpha(X_std, y, standardize_X, alpha_sequence,
-                           nlambda, lambda_min_ratio, num_folds, num_cores,
-                           adaptive_weights)
-
-    results[[i]] <- list(
-      cv_error = cv_results$best_cv_error,
-      lambda = cv_results$best_lambda,
-      alpha = cv_results$best_alpha,
-      gamma = gamma
-    )
+    alpha_cv_results <- cv_alpha(X_std, y, standardize_X_glmnet, alpha_sequence,
+                                 nlambda, lambda_min_ratio, num_folds, num_cores, nobs, ## +++ ADDED nobs +++
+                                 penalty_factor = current_penalty_factor_for_alpha_cv,
+                                 lambda_selection_rule = lambda_selection_rule)
+    gamma_cv_results_list[[i]] <- list(
+      criterion_value = alpha_cv_results$best_criterion_value, ## --- MODIFIED ---
+      lambda = alpha_cv_results$best_lambda, alpha = alpha_cv_results$best_alpha, gamma = current_gamma_iter)
   }
-
-  # Find best gamma
-  best_idx <- which.min(sapply(results, function(x) x$cv_error))
+  criterion_values_for_gamma <- sapply(gamma_cv_results_list, function(x) x$criterion_value) ## --- MODIFIED ---
+  if(all(!is.finite(criterion_values_for_gamma))) stop("cv_gamma: All gammas non-finite criterion.")
+  best_gamma_idx_val <- which.min(criterion_values_for_gamma)
 
   return(list(
-    best_cv_error = results[[best_idx]]$cv_error,
-    best_lambda = results[[best_idx]]$lambda,
-    best_alpha = results[[best_idx]]$alpha,
-    best_gamma = results[[best_idx]]$gamma
-  ))
+    best_criterion_value = gamma_cv_results_list[[best_gamma_idx_val]]$criterion_value, ## --- MODIFIED ---
+    best_lambda = gamma_cv_results_list[[best_gamma_idx_val]]$lambda,
+    best_alpha = gamma_cv_results_list[[best_gamma_idx_val]]$alpha,
+    best_gamma = gamma_cv_results_list[[best_gamma_idx_val]]$gamma ))
 }
 
-#' Cross-validation for covariate-dependent structure
-#'
-#' @param X_std Standardized design matrix
-#' @param y Response vector
-#' @param standardize_X Whether to standardize the predictors
-#' @param alpha_sequence Sequence of alpha values to try
-#' @param nlambda Number of lambda values
-#' @param lambda_min_ratio Ratio of min to max lambda
-#' @param gamma_sequence Sequence of gamma values to try
-#' @param current_coefficients Current coefficient estimates
-#' @param covariate_std Standardized covariate matrix
-#' @param nvars Number of predictor variables
-#' @param num_folds Number of cross-validation folds
-#' @param num_cores Number of cores for parallel computation
-#'
-#' @return A list with best CV error, lambda, alpha, gamma, and optimal tau parameters
-#'
+#' Cross-validation for covariate-dependent structure (Internal)
 #' @keywords internal
-cv_covariate <- function(X_std, y, standardize_X, alpha_sequence, nlambda,
-                         lambda_min_ratio, gamma_sequence,
-                         current_coefficients, covariate_std, nvars,
-                         num_folds, num_cores) {
-
-  # Set up parallel backend
-  doParallel::registerDoParallel(cores = num_cores)
-
-  # Container for results
-  results <- list()
-
-  # For each gamma value
+cv_covariate <- function(X_std, y, standardize_X_glmnet, alpha_sequence, nlambda,
+                         lambda_min_ratio, lambda_selection_rule,
+                         gamma_sequence, prev_coefs_std,
+                         covariate_std, nvars, num_folds, num_cores, nobs, verbose) { ## +++ ADDED nobs +++
+  covariate_cv_results_list <- list()
   for (i in seq_along(gamma_sequence)) {
-    gamma <- gamma_sequence[i]
+    current_gamma_for_tau_opt <- gamma_sequence[i]
+    if(verbose > 1) print(paste("  cv_covariate: Testing gamma_tau =", current_gamma_for_tau_opt))
+    optimal_tau_params_val <- optimize_tau(current_gamma_for_tau_opt, prev_coefs_std, covariate_std, nvars, verbose = verbose)
+    linear_pred_tau <- optimal_tau_params_val[1]
+    if(ncol(covariate_std) > 0) linear_pred_tau <- linear_pred_tau + covariate_std %*% optimal_tau_params_val[-1]
+    current_penalty_factor_for_alpha_cv <- pmin(exp(linear_pred_tau), 1e+12)
+    current_penalty_factor_for_alpha_cv[!is.finite(current_penalty_factor_for_alpha_cv)] <- 1e+12
 
-    # Optimize tau parameters for the current gamma
-    optimal_tau_params <- optimize_tau(gamma, current_coefficients, covariate_std, nvars)
-
-    # Calculate adaptive weights based on optimal tau parameters
-    adaptive_weights <- pmin(exp(optimal_tau_params[1] + covariate_std%*%optimal_tau_params[-1]), 1e+100)
-
-    # Cross-validation across alpha values for the current gamma and tau parameters
-    cv_results <- cv_alpha(X_std, y, standardize_X, alpha_sequence,
-                           nlambda, lambda_min_ratio, num_folds, num_cores,
-                           adaptive_weights)
-
-    results[[i]] <- list(
-      cv_error = cv_results$best_cv_error,
-      lambda = cv_results$best_lambda,
-      alpha = cv_results$best_alpha,
-      gamma = gamma,
-      optimal_tau_params = optimal_tau_params
-    )
+    alpha_cv_results_cov <- cv_alpha(X_std, y, standardize_X_glmnet, alpha_sequence,
+                                     nlambda, lambda_min_ratio, num_folds, num_cores, nobs, ## +++ ADDED nobs +++
+                                     penalty_factor = current_penalty_factor_for_alpha_cv,
+                                     lambda_selection_rule = lambda_selection_rule)
+    covariate_cv_results_list[[i]] <- list(
+      criterion_value = alpha_cv_results_cov$best_criterion_value, ## --- MODIFIED ---
+      lambda = alpha_cv_results_cov$best_lambda, alpha = alpha_cv_results_cov$best_alpha,
+      gamma_for_tau = current_gamma_for_tau_opt, optimal_tau_params = optimal_tau_params_val,
+      final_weights = current_penalty_factor_for_alpha_cv)
   }
-
-  # Find best gamma
-  best_idx <- which.min(sapply(results, function(x) x$cv_error))
+  criterion_values_for_cov_gamma <- sapply(covariate_cv_results_list, function(x) x$criterion_value) ## --- MODIFIED ---
+  if(all(!is.finite(criterion_values_for_cov_gamma))) stop("cv_covariate: All gamma_tau non-finite criterion.")
+  best_cov_gamma_idx_val <- which.min(criterion_values_for_cov_gamma)
 
   return(list(
-    best_cv_error = results[[best_idx]]$cv_error,
-    best_lambda = results[[best_idx]]$lambda,
-    best_alpha = results[[best_idx]]$alpha,
-    best_gamma = results[[best_idx]]$gamma,
-    optimal_tau_params = results[[best_idx]]$optimal_tau_params
-  ))
+    best_criterion_value = covariate_cv_results_list[[best_cov_gamma_idx_val]]$criterion_value, ## --- MODIFIED ---
+    best_lambda = covariate_cv_results_list[[best_cov_gamma_idx_val]]$lambda,
+    best_alpha = covariate_cv_results_list[[best_cov_gamma_idx_val]]$alpha,
+    best_gamma = covariate_cv_results_list[[best_cov_gamma_idx_val]]$gamma_for_tau,
+    optimal_tau_params = covariate_cv_results_list[[best_cov_gamma_idx_val]]$optimal_tau_params,
+    optimal_weights_for_glmnet = covariate_cv_results_list[[best_cov_gamma_idx_val]]$final_weights ))
 }
 
-#' Optimize tau parameters for covariate-dependent structure
-#'
-#' @param gamma Current gamma value
-#' @param current_coefficients Current coefficient estimates
-#' @param covariate_std Standardized covariate matrix
-#' @param max_iter Maximum number of iterations for optimization (default: 5000)
-#'
-#' @return Vector of optimal tau parameters
-#'
+#' Optimize tau parameters for covariate-dependent structure (Internal)
 #' @keywords internal
-optimize_tau <- function(gamma, current_coefficients, covariate_std, max_iter = 5000) {
+optimize_tau <- function(gamma, current_coefficients, covariate_std, nvars, max_iter = 5000, verbose = FALSE) { # nvars added, not used but good for context
   # Input validation
   if (!is.numeric(gamma) || length(gamma) != 1) {
     stop("gamma must be a single numeric value")
   }
-
   if (!is.numeric(current_coefficients)) {
     stop("current_coefficients must be numeric")
   }
-
-  # Handle multi-dimensional covariates
-  # If covariate_std is a vector, convert to matrix with one column
   if (is.vector(covariate_std)) {
     covariate_std <- as.matrix(covariate_std, ncol = 1)
   } else if (!is.matrix(covariate_std)) {
     stop("covariate_std must be a numeric vector or matrix")
   }
 
-  # Get dimensions
-  n_obs <- length(current_coefficients)
   n_covariates <- ncol(covariate_std)
-
-  # Initialize starting values with zeros
-  start_values <- rep(0, n_covariates + 1)
-
-  # Set bounds for optimization
-  lower_bounds <- rep(-30, n_covariates + 1)
-  upper_bounds <- rep(30, n_covariates + 1)
-
-  if (gamma == 1) {
-    optimization_result <- stats::nlminb(
-      start = start_values,
-      lower = lower_bounds,
-      upper = upper_bounds,
-      objective = function(x) {
-        # x[1] is the intercept, x[2:length(x)] are covariate coefficients
-        tau_values <- x[1]
-        if (n_covariates > 0) {
-          for (j in 1:n_covariates) {
-            tau_values <- tau_values + x[j + 1] * covariate_std[, j]
-          }
-        }
-        sum(exp(tau_values) * abs(current_coefficients)) - sum(tau_values)
-      },
-      control = list(eval.max = max_iter, iter.max = max_iter)
-    )
-  } else if ((gamma > 0) && (gamma < 1)) {
-    optimization_result <- stats::nlminb(
-      start = start_values,
-      lower = lower_bounds,
-      upper = upper_bounds,
-      objective = function(x) {
-        # x[1] is the intercept, x[2:length(x)] are covariate coefficients
-        tau_values <- x[1]
-        if (n_covariates > 0) {
-          for (j in 1:n_covariates) {
-            tau_values <- tau_values + x[j + 1] * covariate_std[, j]
-          }
-        }
-        sum(exp(tau_values) * abs(current_coefficients)) -
-          (sum(exp((1 - (1/gamma)) * tau_values))) / (1 - (1/gamma))
-      },
-      control = list(eval.max = max_iter, iter.max = max_iter)
-    )
-  } else {
-    stop("gamma must be a positive number between 0 and 1, or exactly 1")
+  # Ensure current_coefficients and rows of covariate_std match nvars
+  if(length(current_coefficients) != nrow(covariate_std) || length(current_coefficients) != nvars){
+    stop("Mismatch in dimensions for current_coefficients, covariate_std, and nvars in optimize_tau.")
   }
 
-  # Return optimization results
+
+  start_values <- rep(0, n_covariates + 1)
+  lower_bounds <- rep(-30, n_covariates + 1) # Increased range slightly
+  upper_bounds <- rep(30, n_covariates + 1)  # Increased range slightly
+
+  # Define objective function within optimize_tau to capture n_covariates & covariate_std
+  obj_fun <- function(tau_params_iter) {
+    # tau_params_iter[1] is the intercept, tau_params_iter[2:length(tau_params_iter)] are covariate coefficients
+    # Construct w_j(tau) = exp(tau_0 + Z_j^T tau)
+    # Z_j is the j-th row of covariate_std
+    # tau is (tau_1, ..., tau_k)^T
+
+    # Calculate exp_tau_values = exp(tau_0 + Z_j^T tau) for each j
+    # Equivalent to: exp(tau_params_iter[1] + covariate_std %*% tau_params_iter[-1])
+    linear_predictor_tau <- tau_params_iter[1]
+    if (n_covariates > 0) {
+      linear_predictor_tau <- linear_predictor_tau + covariate_std %*% tau_params_iter[-1]
+    } else { # Only intercept tau_0
+      linear_predictor_tau <- rep(tau_params_iter[1], nrow(covariate_std))
+    }
+    exp_tau_values <- exp(linear_predictor_tau)
+
+
+    # Objective function Q(tau) depends on gamma
+    if (gamma == 1) {
+      # Q(tau) = sum_{j=1}^p { exp(tau_0 + Z_j^T tau) * |beta_j^0| - (tau_0 + Z_j^T tau) }
+      #        = sum_{j=1}^p { w_j(tau) * |beta_j^0| - log(w_j(tau)) }
+      term1 <- sum(exp_tau_values * abs(current_coefficients), na.rm = TRUE)
+      term2 <- sum(linear_predictor_tau, na.rm = TRUE) # sum of log(w_j(tau))
+      return(term1 - term2)
+    } else if (gamma > 0 && gamma < 1) {
+      # Q(tau) = sum_{j=1}^p { exp(tau_0 + Z_j^T tau) * |beta_j^0| } - (1/(1 - 1/gamma)) * sum_{j=1}^p { exp((1 - 1/gamma)(tau_0 + Z_j^T tau)) }
+      #        = sum_{j=1}^p { w_j(tau) * |beta_j^0| } - (1/(1 - 1/gamma)) * sum_{j=1}^p { (w_j(tau))^(1 - 1/gamma) }
+      term1 <- sum(exp_tau_values * abs(current_coefficients), na.rm = TRUE)
+
+      exponent_term2 <- (1 - (1/gamma)) * linear_predictor_tau
+      sum_exp_term2 <- sum(exp(exponent_term2), na.rm = TRUE)
+
+      term2_coeff <- 1 / (1 - (1/gamma)) # This is gamma / (gamma - 1)
+
+      return(term1 - term2_coeff * sum_exp_term2)
+    } else {
+      stop("gamma must be a positive number (0, 1] for optimize_tau")
+    }
+  }
+
+  optimization_result <- tryCatch({
+    stats::nlminb(
+      start = start_values,
+      objective = obj_fun,
+      lower = lower_bounds,
+      upper = upper_bounds,
+      control = list(eval.max = max_iter, iter.max = max_iter, trace = 0) # trace = 0 to suppress output
+    )
+  }, error = function(e) {
+    # message(paste("nlminb failed in optimize_tau for gamma =", gamma, ":", e$message))
+    # Return a list with $par similar to nlminb output, but with starting values as fallback
+    list(par = start_values, objective = Inf, convergence = -1, message = e$message)
+  })
+
+  if(optimization_result$convergence != 0 && verbose) {
+    # message(paste("optimize_tau (nlminb) did not converge for gamma =", gamma, ". Message:", optimization_result$message))
+  }
+
   return(optimization_result$par)
 }
 

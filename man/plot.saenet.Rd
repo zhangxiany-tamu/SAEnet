@@ -14,22 +14,84 @@
 )
 }
 \arguments{
-\item{x}{A fitted SAEnet model object}
+\item{x}{A fitted SAEnet model object (output from the `saenet` function).}
 
-\item{type}{Character. Type of plot: "coefficients" for coefficient plot or "cv.error" for cross-validation error plot}
+\item{type}{Character string. Specifies the type of plot:
+\itemize{
+  \item `"coefficients"`: (Default) Plots the non-zero coefficient values from a
+        specified iteration. Uses a horizontal barplot for fewer than or equal to 50
+        coefficients and a dotchart for more than 50.
+  \item `"cv.error"`: Plots the mean cross-validation error against the
+        iteration number.
+}}
 
-\item{iteration}{Integer. The iteration number to use for plotting coefficients (default: the final iteration)}
+\item{iteration}{Integer. The iteration number from the SAEnet fit to use for
+plotting coefficients. Defaults to the final iteration (`x$num_iterations`).
+Not used if `type = "cv.error"`.}
 
-\item{top_n}{Integer. Maximum number of variables to display (ordered by absolute value). Default is NULL (all)}
+\item{top_n}{Integer or NULL. For `type = "coefficients"`, specifies the maximum
+number of non-zero variables to display, ordered by the absolute value of their
+coefficients. If NULL (default), all non-zero coefficients are plotted.}
 
-\item{max_name_length}{Integer. Maximum length for variable names in plot. Longer names will be truncated.
-Default is 20. Set to NULL to show full names.}
+\item{max_name_length}{Integer or NULL. For `type = "coefficients"`, the maximum
+length for variable names displayed in the plot. Longer names will be truncated
+and appended with "...". Default is 20. Set to NULL to show full names without truncation.}
 
-\item{...}{Further arguments passed to the plotting function}
+\item{...}{Further arguments passed to the underlying plotting functions
+(e.g., `graphics::barplot`, `graphics::dotchart`, `graphics::plot`).}
 }
 \value{
-None (creates a plot)
+Invisibly returns the input object `x`. The function's primary purpose
+  is to generate a plot.
 }
 \description{
-Create plots for a fitted SAEnet model
+Create plots for a fitted SAEnet model object. This function can plot
+the coefficient paths or the cross-validation error across iterations.
+}
+\examples{
+# Generate some example data (as in the saenet function examples)
+set.seed(123)
+n_obs <- 100
+n_vars <- 20 # Using fewer variables for a quicker plot example
+X_example <- matrix(rnorm(n_obs * n_vars), n_obs, n_vars)
+colnames(X_example) <- paste0("Var", 1:n_vars)
+true_beta_example <- c(rep(1.5, 5), rep(-0.8, 3), rep(0, n_vars - 8))
+y_example <- X_example \%*\% true_beta_example + rnorm(n_obs, 0, 0.5)
+
+# Assuming 'saenet' function and its dependencies are loaded
+# And assuming 'predict.saenet' is also defined for the examples in saenet()
+# For this plot example, we just need a dummy saenet object structure
+# if the full saenet() call is too slow for a simple plot test.
+
+# Dummy saenet fit for plotting examples (replace with actual fit if saenet is fast)
+if (requireNamespace("stats", quietly = TRUE) && exists("saenet")) {
+  # Use a very minimal saenet run if possible
+  # This is just to ensure the examples can run if saenet() itself is not defined here
+  # In a real package, saenet() would be available.
+  capture.output( # Suppress verbose output from saenet for example
+    fit_example <- tryCatch(
+       saenet(y = y_example, x = X_example, max_iterations = 2,
+              num_folds = 3, num_cores = 1, verbose = FALSE,
+              lambda_selection_rule = "lambda.min"),
+       error = function(e) NULL
+    )
+  )
+
+  if (!is.null(fit_example)) {
+    # Plot non-zero coefficients from the final iteration
+    plot(fit_example, type = "coefficients")
+
+    # Plot top 5 non-zero coefficients
+    plot(fit_example, type = "coefficients", top_n = 5)
+
+    # Plot CV error across iterations
+    plot(fit_example, type = "cv.error")
+  } else {
+    message("Skipping plot.saenet examples as saenet() function or
+    its dependencies are not fully available or failed.")
+  }
+} else {
+  message("Skipping plot.saenet examples: 'stats' package or 'saenet' function not available.")
+}
+
 }

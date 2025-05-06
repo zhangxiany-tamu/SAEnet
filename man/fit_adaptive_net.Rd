@@ -2,22 +2,24 @@
 % Please edit documentation in R/SAEnet.R
 \name{fit_adaptive_net}
 \alias{fit_adaptive_net}
-\title{Fit Structure-Adaptive Elastic Net model}
+\title{Fit Structure-Adaptive Elastic Net model (Internal)}
 \usage{
 fit_adaptive_net(
   y,
   X_std,
   structure_info,
   max_iterations,
-  standardize_X,
+  standardize_X_glmnet,
   alpha_sequence,
   nlambda,
   lambda_min_ratio,
+  lambda_selection_rule,
   gamma_sequence,
   num_folds,
   num_cores,
   verbose,
-  nvars
+  nvars,
+  nobs
 )
 }
 \arguments{
@@ -25,19 +27,23 @@ fit_adaptive_net(
 
 \item{X_std}{Standardized design matrix}
 
-\item{structure_info}{External structural information (NULL, group-based, or covariate-based)}
+\item{structure_info}{External structural information}
 
 \item{max_iterations}{Maximum number of iterations}
 
-\item{standardize_X}{Whether to standardize the predictors}
+\item{standardize_X_glmnet}{Logical, passed to glmnet's standardize argument.
+Note: X_std is already standardized if saenet's standardize=TRUE.
+This controls glmnet's internal standardization. Usually FALSE if X_std is pre-standardized.}
 
-\item{alpha_sequence}{Sequence of alpha values to try}
+\item{alpha_sequence}{Sequence of alpha values}
 
 \item{nlambda}{Number of lambda values}
 
 \item{lambda_min_ratio}{Ratio of min to max lambda}
 
-\item{gamma_sequence}{Sequence of gamma values to try}
+\item{lambda_selection_rule}{Rule for lambda selection ("lambda.min" or "lambda.1se")}
+
+\item{gamma_sequence}{Sequence of gamma values}
 
 \item{num_folds}{Number of cross-validation folds}
 
@@ -48,18 +54,9 @@ fit_adaptive_net(
 \item{nvars}{Number of predictor variables}
 }
 \value{
-A list with the following components:
-  \itemize{
-    \item coef_std_matrix: Matrix of coefficient estimates (standardized scale)
-    \item intercept_std_vector: Vector of intercept estimates
-    \item weights_matrix: Matrix of adaptive weights
-    \item cv_error_vector: Vector of cross-validation errors
-    \item lambda_vector: Vector of selected lambda values
-    \item alpha_vector: Vector of selected alpha values
-    \item gamma_vector: Vector of selected gamma values
-  }
+A list with model fitting results on the standardized scale.
 }
 \description{
-Internal function that implements the core fitting algorithm for SAEnet models.
+Fit Structure-Adaptive Elastic Net model (Internal)
 }
 \keyword{internal}

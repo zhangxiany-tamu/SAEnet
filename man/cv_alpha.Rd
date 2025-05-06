@@ -2,18 +2,20 @@
 % Please edit documentation in R/SAEnet.R
 \name{cv_alpha}
 \alias{cv_alpha}
-\title{Cross-validation across alpha values}
+\title{Cross-validation across alpha values (Internal)}
 \usage{
 cv_alpha(
   X_std,
   y,
-  standardize_X,
+  standardize_X_glmnet,
   alpha_sequence,
   nlambda,
   lambda_min_ratio,
   num_folds,
-  num_cores = 1,
-  penalty_factor = NULL
+  num_cores,
+  nobs,
+  penalty_factor = NULL,
+  lambda_selection_rule
 )
 }
 \arguments{
@@ -21,24 +23,26 @@ cv_alpha(
 
 \item{y}{Response vector}
 
-\item{standardize_X}{Whether to standardize the predictors}
+\item{standardize_X_glmnet}{Logical, passed to glmnet's standardize argument.}
 
-\item{alpha_sequence}{Sequence of alpha values to try}
+\item{alpha_sequence}{Sequence of alpha values}
 
-\item{nlambda}{Number of lambda values}
+\item{nlambda}{Number of lambda values for cv.glmnet}
 
-\item{lambda_min_ratio}{Ratio of min to max lambda}
+\item{lambda_min_ratio}{Ratio for lambda sequence in cv.glmnet}
 
-\item{num_folds}{Number of cross-validation folds}
+\item{num_folds}{Number of CV folds}
 
-\item{num_cores}{Number of cores for parallel computation}
+\item{num_cores}{Number of cores}
 
-\item{penalty_factor}{Optional vector of penalty factors}
+\item{penalty_factor}{Penalty factors for glmnet}
+
+\item{lambda_selection_rule}{Rule for lambda selection ("lambda.min" or "lambda.1se")}
 }
 \value{
-A list with best CV error, lambda, and alpha
+List with best_cv_error, best_lambda, best_alpha.
 }
 \description{
-Cross-validation across alpha values
+Cross-validation across alpha values (Internal)
 }
 \keyword{internal}

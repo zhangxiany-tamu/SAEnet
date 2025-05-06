@@ -14,7 +14,8 @@ saenet(
   standardize = TRUE,
   alpha_sequence = seq(0, 1, by = 0.1),
   nlambda = 100,
-  lambda_min_ratio = ifelse(nobs < nvars, 0.01, 1e-04),
+  lambda_min_ratio = NULL,
+  lambda_selection_rule = c("lambda.min", "lambda.1se", "bic"),
   gamma_sequence = seq(0.1, 1, by = 0.1),
   num_folds = 10,
   num_cores = 1,
@@ -48,8 +49,16 @@ where alpha=1 is lasso and alpha=0 is ridge (default: seq(0, 1, by = 0.1))}
 
 \item{nlambda}{Number of lambda values to generate in the sequence (default: 100)}
 
-\item{lambda_min_ratio}{Ratio of smallest to largest lambda value in the sequence
-(default: 1e-4 for n >= p, 0.01 for n < p)}
+\item{lambda_min_ratio}{Ratio of smallest to largest lambda value in the sequence.
+If NULL, defaults to 1e-4 for n >= p, and 0.01 for n < p (default: NULL).}
+
+\item{lambda_selection_rule}{Character string specifying the rule for selecting the optimal lambda from
+cross-validation. Options are:
+\itemize{
+  \item `"lambda.min"`: (Default) The lambda that gives the minimum mean cross-validated error.
+  \item `"lambda.1se"`: The largest lambda such that the cross-validated error is within one
+        standard error of the minimum. This typically results in a more parsimonious model.
+}}
 
 \item{gamma_sequence}{A sequence of power parameters for adaptive weights
 (default: seq(0.1, 1, by = 0.1))}
@@ -65,14 +74,16 @@ An object of class "saenet" with the following components:
   \itemize{
     \item intercept: Vector of estimated intercept values for each iteration
     \item coefficients: Matrix of estimated coefficient vectors (on original scale)
-         with columns corresponding to iterations
+          with columns corresponding to iterations
     \item weights: Matrix of adaptive weights for each iteration
     \item cv_errors: Vector of cross-validation errors for each iteration
+          (corresponding to the selected lambda based on `lambda_selection_rule`)
     \item lambda: Vector of selected lambda parameters for each iteration
     \item alpha: Vector of selected alpha parameters for each iteration
     \item gamma: Vector of selected gamma parameters for each iteration
     \item num_iterations: Number of iterations performed
     \item feature_scaling: Scaling information for predictors (if standardize=TRUE)
+    \item lambda_selection_rule: The rule used for lambda selection.
   }
 }
 \description{
@@ -94,57 +105,55 @@ The algorithm follows an iterative procedure:
 4. Repeat steps 2-3 for a specified number of iterations
 }
 \examples{
-# Example 1: Standard Adaptive Elastic Net (No Structure)
+# Generate common example data
 set.seed(123)
 n <- 100  # number of observations
-p <- 200  # number of variables
-X <- matrix(rnorm(n * p), n, p)
-beta_true <- c(rep(1, 10), rep(0, p - 10))
-y <- X \%*\% beta_true + rnorm(n, 0, 0.5)
+p <- 50   # number of variables
+X_data <- matrix(rnorm(n * p), n, p)
+colnames(X_data) <- paste0("V", 1:p)
+# True beta: first 5 are strong, next 5 are moderate, rest are zero
+true_beta <- c(rep(1.5, 5), rep(0.3, 5), rep(0, p - 10))
+y_data <- X_data \%*\% true_beta + rnorm(n, 0, 0.75) # Slightly more noise
 
-# Fit the model
-fit <- saenet(y = y, x = X, max_iterations = 3, num_folds = 5)
+# --- Demonstrating the benefit of structure (using BIC for selection) ---
+message("--- Comparing Models (BIC selection, max_iter=3, num_folds=3 for CV parts if any) ---")
 
-# View model summary
-print(fit)
+# 1. Standard SAEnet (No Structure)
+fit_no_structure_bic <- saenet(y = y_data, x = X_data, max_iterations = 3,
+                               lambda_selection_rule = "bic",
+                               num_cores = 1, verbose = FALSE, num_folds = 3)
+nz_no_structure <- sum(abs(predict(fit_no_structure_bic, type = "coefficients")) > 1e-8)
+crit_no_structure <- tail(fit_no_structure_bic$criterion_value, 1)
+message(sprintf("No Structure (BIC): Non-zero coefs = \%d, Final BIC = \%.2f",
+                nz_no_structure, crit_no_structure))
 
-# Extract coefficients from the final iteration
-beta_est <- predict(fit, type = "coefficients")
+# 2. Group-based Structure
+# Define groups: first 10 variables (true signals) in one group, rest in another
+groups_meaningful <- c(rep(1, 10), rep(2, p - 10))
+structure_group_meaningful <- list(group = groups_meaningful)
+fit_group_bic <- saenet(y = y_data, x = X_data,
+                        structure_info = structure_group_meaningful,
+                        max_iterations = 3, lambda_selection_rule = "bic",
+                        num_cores = 1, verbose = FALSE, num_folds = 3)
+nz_group <- sum(abs(predict(fit_group_bic, type = "coefficients")) > 1e-8)
+crit_group <- tail(fit_group_bic$criterion_value, 1)
+message(sprintf("Group Structure (BIC): Non-zero coefs = \%d, Final BIC = \%.2f",
+                nz_group, crit_group))
 
-# Make predictions for new data
-predictions <- predict(fit, newx = X)
-
-# Plot non-zero coefficients
-plot(fit, type = "coefficients")
-
-# Plot CV error across iterations
-plot(fit, type = "cv.error")
-
-# Example 2: Group-based Structure
-# Create arbitrary groups for variables (10 groups of 20 variables each)
-groups <- rep(1:10, each = 20)
-structure_info <- list(group = groups)
-
-# Fit the model with group structure
-fit_group <- saenet(y = y, x = X, structure_info = structure_info,
-                    max_iterations = 3, num_folds = 5)
-
-# Plot non-zero coefficients
-plot(fit_group, type = "coefficients")
-
-# Example 3: Covariate-dependent Structure
-# Create arbitrary covariate related to variable importance
-# (higher values for more important variables)
-covariate <- runif(p)
-covariate[1:10] <- covariate[1:10] + 0.5  # make important variables have higher values
-structure_info <- list(covariate = matrix(covariate, ncol = 1))
-
-# Fit the model with covariate structure
-fit_covariate <- saenet(y = y, x = X, structure_info = structure_info,
-                        max_iterations = 3, num_folds = 5)
-
-# Plot non-zero coefficients
-plot(fit_covariate, type = "coefficients")
+# 3. Covariate-dependent Structure
+# Define a covariate: higher values for the first 10 true signal variables
+covariate_meaningful <- rep(0.1, p)
+covariate_meaningful[1:10] <- 1.0 # Higher value for true signals
+covariate_meaningful[6:10] <- 0.7 # Moderately high for moderate signals
+structure_cov_meaningful <- list(covariate = matrix(covariate_meaningful, ncol = 1))
+fit_covariate_bic <- saenet(y = y_data, x = X_data,
+                            structure_info = structure_cov_meaningful,
+                            max_iterations = 3, lambda_selection_rule = "bic",
+                            num_cores = 1, verbose = FALSE, num_folds = 3)
+nz_covariate <- sum(abs(predict(fit_covariate_bic, type = "coefficients")) > 1e-8)
+crit_covariate <- tail(fit_covariate_bic$criterion_value, 1)
+message(sprintf("Covariate Structure (BIC): Non-zero coefs = \%d, Final BIC = \%.2f",
+                nz_covariate, crit_covariate))
 
 }
 \references{

@@ -6,16 +6,6 @@
 \usage{
 calculate_group_weights(coefficients, group_indices, num_groups)
 }
-\arguments{
-\item{coefficients}{Current coefficient estimates}
-
-\item{group_indices}{List of indices for each group}
-
-\item{num_groups}{Number of groups}
-}
-\value{
-Vector of weights (1/mean(|beta|) within each group)
-}
 \description{
 Calculate weights for group-based adaptive elastic net
 }

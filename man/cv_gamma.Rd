@@ -2,46 +2,25 @@
 % Please edit documentation in R/SAEnet.R
 \name{cv_gamma}
 \alias{cv_gamma}
-\title{Cross-validation to find optimal gamma parameter}
+\title{Cross-validation to find optimal gamma parameter (Internal)}
 \usage{
 cv_gamma(
   X_std,
   y,
-  standardize_X,
+  standardize_X_glmnet,
   alpha_sequence,
   nlambda,
   lambda_min_ratio,
+  lambda_selection_rule,
   gamma_sequence,
-  initial_weights,
+  initial_weights_for_gamma_opt,
   num_folds,
-  num_cores
+  num_cores,
+  nobs,
+  verbose
 )
 }
-\arguments{
-\item{X_std}{Standardized design matrix}
-
-\item{y}{Response vector}
-
-\item{standardize_X}{Whether to standardize the predictors}
-
-\item{alpha_sequence}{Sequence of alpha values to try}
-
-\item{nlambda}{Number of lambda values}
-
-\item{lambda_min_ratio}{Ratio of min to max lambda}
-
-\item{gamma_sequence}{Sequence of gamma values to try}
-
-\item{initial_weights}{Initial weights for adaptive penalties}
-
-\item{num_folds}{Number of cross-validation folds}
-
-\item{num_cores}{Number of cores for parallel computation}
-}
-\value{
-A list with best CV error, lambda, alpha, and gamma
-}
 \description{
-Cross-validation to find optimal gamma parameter
+Cross-validation to find optimal gamma parameter (Internal)
 }
 \keyword{internal}

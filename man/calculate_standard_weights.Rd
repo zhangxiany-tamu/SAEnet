@@ -6,12 +6,6 @@
 \usage{
 calculate_standard_weights(coefficients)
 }
-\arguments{
-\item{coefficients}{Current coefficient estimates}
-}
-\value{
-Vector of weights (1/|beta|)
-}
 \description{
 Calculate weights for standard adaptive elastic net
 }

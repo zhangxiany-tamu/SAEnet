@@ -2,23 +2,18 @@
 % Please edit documentation in R/SAEnet.R
 \name{optimize_tau}
 \alias{optimize_tau}
-\title{Optimize tau parameters for covariate-dependent structure}
+\title{Optimize tau parameters for covariate-dependent structure (Internal)}
 \usage{
-optimize_tau(gamma, current_coefficients, covariate_std, max_iter = 5000)
-}
-\arguments{
-\item{gamma}{Current gamma value}
-
-\item{current_coefficients}{Current coefficient estimates}
-
-\item{covariate_std}{Standardized covariate matrix}
-
-\item{max_iter}{Maximum number of iterations for optimization (default: 5000)}
-}
-\value{
-Vector of optimal tau parameters
+optimize_tau(
+  gamma,
+  current_coefficients,
+  covariate_std,
+  nvars,
+  max_iter = 5000,
+  verbose = FALSE
+)
 }
 \description{
-Optimize tau parameters for covariate-dependent structure
+Optimize tau parameters for covariate-dependent structure (Internal)
 }
 \keyword{internal}

@@ -2,52 +2,27 @@
 % Please edit documentation in R/SAEnet.R
 \name{cv_covariate}
 \alias{cv_covariate}
-\title{Cross-validation for covariate-dependent structure}
+\title{Cross-validation for covariate-dependent structure (Internal)}
 \usage{
 cv_covariate(
   X_std,
   y,
-  standardize_X,
+  standardize_X_glmnet,
   alpha_sequence,
   nlambda,
   lambda_min_ratio,
+  lambda_selection_rule,
   gamma_sequence,
-  current_coefficients,
+  prev_coefs_std,
   covariate_std,
   nvars,
   num_folds,
-  num_cores
+  num_cores,
+  nobs,
+  verbose
 )
 }
-\arguments{
-\item{X_std}{Standardized design matrix}
-
-\item{y}{Response vector}
-
-\item{standardize_X}{Whether to standardize the predictors}
-
-\item{alpha_sequence}{Sequence of alpha values to try}
-
-\item{nlambda}{Number of lambda values}
-
-\item{lambda_min_ratio}{Ratio of min to max lambda}
-
-\item{gamma_sequence}{Sequence of gamma values to try}
-
-\item{current_coefficients}{Current coefficient estimates}
-
-\item{covariate_std}{Standardized covariate matrix}
-
-\item{nvars}{Number of predictor variables}
-
-\item{num_folds}{Number of cross-validation folds}
-
-\item{num_cores}{Number of cores for parallel computation}
-}
-\value{
-A list with best CV error, lambda, alpha, gamma, and optimal tau parameters
-}
 \description{
-Cross-validation for covariate-dependent structure
+Cross-validation for covariate-dependent structure (Internal)
 }
 \keyword{internal}
