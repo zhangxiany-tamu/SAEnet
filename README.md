@@ -208,19 +208,6 @@ The method incorporates three different approaches to weight generation:
 
 The package supports both cross-validation (with "lambda.min" or "lambda.1se" options) and BIC for model selection, allowing users to choose between prediction accuracy and model parsimony.
 
-### Performance Benefits of Using Structure
-
-The key advantages of incorporating structural information include:
-
-1. **Improved variable selection**: By sharing information across related variables, the structure-based approaches typically select more relevant variables
-2. **Better prediction accuracy**: Structure-informed models often achieve lower prediction error
-3. **More stable coefficient estimates**: Especially in high-dimensional settings, structure can stabilize the estimation procedure
-
-These benefits are particularly pronounced when:
-- The true model has group or pathway structure (common in genomics, neuroimaging, etc.)
-- The signal-to-noise ratio is moderate to low
-- The sample size is limited relative to the number of predictors
-
 ## Citation
 
 If you use SAEnet in your research, please cite:
