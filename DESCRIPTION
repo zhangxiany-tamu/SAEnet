@@ -1,0 +1,32 @@
+Package: SAEnet
+Type: Package
+Title: Structure-Adaptive Elastic Net for High-Dimensional Regression
+Version: 0.1.0
+Date: 2025-05-06
+Authors@R: 
+    person(given = "Xianyang",
+           family = "Zhang",
+           role = c("aut", "cre"),
+           email = "zhangxiany@stat.tamu.edu")
+Description: Implements the Structure-Adaptive Elastic Net (SAEnet) method for 
+    high-dimensional regression with external structural information.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Depends: 
+    R (>= 3.5.0)
+Imports: 
+    glmnet (>= 4.1-0),
+    foreach (>= 1.5.2),
+    doParallel (>= 1.0.17),
+    stats,
+    graphics
+Suggests: 
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown,
+    Matrix
+RoxygenNote: 7.3.2
+VignetteBuilder: knitr
+URL: https://github.com/zhangxiany-tamu/SAEnet
+BugReports: https://github.com/zhangxiany-tamu/SAEnet/issues
