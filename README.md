@@ -202,7 +202,7 @@ The Structure-Adaptive Elastic Net algorithm follows an iterative procedure:
 
 The method incorporates three different approaches to weight generation:
 
-- **Standard adaptive weights**: When no structural information is provided, weights are calculated as 1/|β̂| for each coefficient
+- **Standard adaptive weights**: When no structural information is provided, weights are calculated as $1/|\hat{\beta}|^\gamma$ for each coefficient
 - **Group-based structure**: Group-level information is used to assign identical weights to variables within the same group, based on the mean absolute coefficient value within each group
 - **Covariate-dependent structure**: A nonlinear optimization is performed to find the optimal relationship between covariates and penalty weights
 
