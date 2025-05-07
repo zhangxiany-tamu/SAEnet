@@ -100,8 +100,8 @@ bic_std <- tail(fit_std$criterion_value, 1)
 bic_covariate <- tail(fit_covariate$criterion_value, 1)
 
 # Get coefficient estimates
-beta_std <- predict.saenet(fit_std, type = "coefficients")
-beta_covariate <- predict.saenet(fit_covariate, type = "coefficients")
+beta_std <- predict(fit_std, type = "coefficients")
+beta_covariate <- predict(fit_covariate, type = "coefficients")
 
 # Calculate performance metrics
 # True positives: non-zero coefficients correctly identified
@@ -226,8 +226,8 @@ fit_group <- saenet(y = y, x = X,
 
 # Compare overall results
 # Get coefficient estimates
-beta_std <- predict.saenet(fit_std, type = "coefficients")
-beta_group <- predict.saenet(fit_group, type = "coefficients")
+beta_std <- predict(fit_std, type = "coefficients")
+beta_group <- predict(fit_group, type = "coefficients")
 
 # Calculate performance metrics
 tp_std <- sum(abs(beta_std) > 1e-8 & beta_true != 0)
@@ -337,9 +337,9 @@ fit_cv_1se <- saenet(y = y_select, x = X_select,
                     num_folds = 5)
 
 # Compare number of non-zero coefficients
-nz_bic <- sum(abs(predict.saenet(fit_bic, type = "coefficients")) > 1e-8)
-nz_cv_min <- sum(abs(predict.saenet(fit_cv_min, type = "coefficients")) > 1e-8)
-nz_cv_1se <- sum(abs(predict.saenet(fit_cv_1se, type = "coefficients")) > 1e-8)
+nz_bic <- sum(abs(predict(fit_bic, type = "coefficients")) > 1e-8)
+nz_cv_min <- sum(abs(predict(fit_cv_min, type = "coefficients")) > 1e-8)
+nz_cv_1se <- sum(abs(predict(fit_cv_1se, type = "coefficients")) > 1e-8)
 
 cat(sprintf("True model has 7 non-zero coefficients\n"))
 cat(sprintf("BIC selection: %d non-zero coefficients\n", nz_bic))
@@ -391,8 +391,8 @@ plot(fit_glmnet)
 plot(fit_gcdnet)
 
 # Make predictions
-predictions_glmnet <- predict.saenet(fit_glmnet, newx = X_data[1:5,], type = "response")
-predictions_gcdnet <- predict.saenet(fit_gcdnet, newx = X_data[1:5,], type = "response")
+predictions_glmnet <- predict(fit_glmnet, newx = X_data[1:5,], type = "response")
+predictions_gcdnet <- predict(fit_gcdnet, newx = X_data[1:5,], type = "response")
 ```
 
 ## Visualization
