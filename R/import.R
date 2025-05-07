@@ -57,7 +57,7 @@ NULL
 # `foreach` loop within your `cv_alpha` function.
 if (getRversion() >= "2.15.1") {
   utils::globalVariables(c(
-    "current_alpha_iter"
+    "current_alpha_iter", "current_lambda2_iter"
     # Add any other undefined global variables identified by R CMD check here.
     # e.g. "alpha" if it was still an issue from previous checks.
   ))

@@ -27,6 +27,15 @@ devtools::install_github("zhangxiany-tamu/SAEnet")
 - **Multiple selection criteria**: Supports both cross-validation ("lambda.min", "lambda.1se") and BIC for model selection
 - **Visualization tools**: Built-in methods for model visualization and coefficient plotting
 - **Parallel processing**: Support for parallel computation to speed up cross-validation
+- **Multiple implementations**: Offers both glmnet-based (saenet) and gcdnet-based (saenet2) implementations for flexibility
+
+## Implementation Options
+
+SAEnet provides two implementations of the Structure-Adaptive Elastic Net method:
+
+1. **saenet**: The original implementation using the glmnet package, which parameterizes the elastic net through the alpha mixing parameter (alpha=0 for ridge, alpha=1 for lasso).
+
+2. **saenet2**: An alternative implementation using the gcdnet package, which parameterizes the elastic net through separate L1 (lambda) and L2 (lambda2) penalties.
 
 ## Demonstrating the Benefit of Structural Information
 
@@ -91,8 +100,8 @@ bic_std <- tail(fit_std$criterion_value, 1)
 bic_covariate <- tail(fit_covariate$criterion_value, 1)
 
 # Get coefficient estimates
-beta_std <- predict(fit_std, type = "coefficients")
-beta_covariate <- predict(fit_covariate, type = "coefficients")
+beta_std <- predict.saenet(fit_std, type = "coefficients")
+beta_covariate <- predict.saenet(fit_covariate, type = "coefficients")
 
 # Calculate performance metrics
 # True positives: non-zero coefficients correctly identified
@@ -204,7 +213,7 @@ y <- X %*% beta_true + rnorm(n, 0, sigma)
 structure_info <- list(group = group_membership)
 
 # Fit models for comparison
-# 1. Standard Elastic Net (no group structure)
+# 1. Standard Elastic Net (no structure)
 fit_std <- saenet(y = y, x = X, 
                  lambda_selection_rule = "bic", 
                  max_iterations = 5)
@@ -217,8 +226,8 @@ fit_group <- saenet(y = y, x = X,
 
 # Compare overall results
 # Get coefficient estimates
-beta_std <- predict(fit_std, type = "coefficients")
-beta_group <- predict(fit_group, type = "coefficients")
+beta_std <- predict.saenet(fit_std, type = "coefficients")
+beta_group <- predict.saenet(fit_group, type = "coefficients")
 
 # Calculate performance metrics
 tp_std <- sum(abs(beta_std) > 1e-8 & beta_true != 0)
@@ -328,9 +337,9 @@ fit_cv_1se <- saenet(y = y_select, x = X_select,
                     num_folds = 5)
 
 # Compare number of non-zero coefficients
-nz_bic <- sum(abs(predict(fit_bic, type = "coefficients")) > 1e-8)
-nz_cv_min <- sum(abs(predict(fit_cv_min, type = "coefficients")) > 1e-8)
-nz_cv_1se <- sum(abs(predict(fit_cv_1se, type = "coefficients")) > 1e-8)
+nz_bic <- sum(abs(predict.saenet(fit_bic, type = "coefficients")) > 1e-8)
+nz_cv_min <- sum(abs(predict.saenet(fit_cv_min, type = "coefficients")) > 1e-8)
+nz_cv_1se <- sum(abs(predict.saenet(fit_cv_1se, type = "coefficients")) > 1e-8)
 
 cat(sprintf("True model has 7 non-zero coefficients\n"))
 cat(sprintf("BIC selection: %d non-zero coefficients\n", nz_bic))
@@ -342,9 +351,53 @@ cat(sprintf("CV 1SE selection: %d non-zero coefficients\n", nz_cv_1se))
 # The 1SE rule typically gives more parsimonious models than lambda.min
 ```
 
+## Comparing saenet and saenet2 Implementations
+
+Both implementations can be used interchangeably with the same S3 methods:
+
+```r
+# Generate example data
+set.seed(123)
+n <- 100  # number of observations
+p <- 50   # number of variables
+X_data <- matrix(rnorm(n * p), n, p)
+colnames(X_data) <- paste0("X", 1:p)
+true_beta <- c(rep(1.5, 5), rep(0.3, 5), rep(0, p - 10))
+y_data <- X_data %*% true_beta + rnorm(n, 0, 0.75)
+
+# Create group structure
+groups <- c(rep(1, 10), rep(2, p - 10))
+structure_info_group <- list(group = groups)
+
+# Fit with both implementations
+# 1. glmnet-based implementation (saenet)
+fit_glmnet <- saenet(y = y_data, x = X_data, 
+                    structure_info = structure_info_group,
+                    lambda_selection_rule = "bic",
+                    max_iterations = 3)
+
+# 2. gcdnet-based implementation (saenet2)
+fit_gcdnet <- saenet2(y = y_data, x = X_data, 
+                      structure_info = structure_info_group,
+                      lambda_selection_rule = "bic",
+                      max_iterations = 3)
+
+# Compare results
+print(fit_glmnet)  # View model summary
+print(fit_gcdnet)  # View model summary
+
+# Use identical plotting functionality
+plot(fit_glmnet)
+plot(fit_gcdnet)
+
+# Make predictions
+predictions_glmnet <- predict.saenet(fit_glmnet, newx = X_data[1:5,], type = "response")
+predictions_gcdnet <- predict.saenet(fit_gcdnet, newx = X_data[1:5,], type = "response")
+```
+
 ## Visualization
 
-SAEnet provides built-in plotting functions:
+SAEnet provides built-in plotting functions for both implementations:
 
 ```r
 # Plot coefficients from the final iteration
@@ -355,6 +408,10 @@ plot(fit, type = "coefficients", top_n = 20)
 
 # Plot coefficients from a specific iteration
 plot(fit, type = "coefficients", iteration = 2)
+
+# Plot criterion values across iterations (BIC or CV error)
+plot(fit_glmnet, type = "criterion.value")
+plot(fit_gcdnet, type = "criterion.value")
 ```
 
 ## Technical Details
@@ -368,11 +425,25 @@ The Structure-Adaptive Elastic Net algorithm follows an iterative procedure:
 
 The method incorporates three different approaches to weight generation:
 
-- **Standard adaptive weights**: When no structural information is provided, weights are calculated as $1/|\hat{\beta}|^\gamma$ for each coefficient
+- **Standard adaptive weights**: When no structural information is provided, weights are calculated as $1/|\hat{\beta}_i|^\gamma$ for each coefficient
 - **Group-based structure**: Group-level information is used to assign identical weights to variables within the same group, based on the mean absolute coefficient value within each group
 - **Covariate-dependent structure**: A nonlinear optimization is performed to find the optimal relationship between covariates and penalty weights
 
 The package supports both cross-validation (with "lambda.min" or "lambda.1se" options) and BIC for model selection, allowing users to choose between prediction accuracy and model parsimony.
+
+### Implementation Differences
+
+The two implementations differ primarily in how they parameterize the elastic net penalty:
+
+- **saenet (glmnet-based)**: Uses the elastic net mixing parameter $\alpha\in[0,1]$, where:
+  - $\alpha=0$ corresponds to ridge regression
+  - $\alpha=1$ corresponds to lasso regression
+  - The overall penalty is $\lambda\sum^{p}_{i=1} w_i\{\alpha |\beta_i| + (1-\alpha)\beta_i^2\}$
+
+- **saenet2 (gcdnet-based)**: Uses separate L1 and L2 penalties:
+  - $\lambda_1$ controls the L1 (lasso) penalty
+  - $\lambda_2$ controls the L2 (ridge) penalty
+  - The overall penalty is $\lambda_1\sum^{p}_{i=1}w_i|\beta_i| + \lambda_2\|\beta\|_2^2$
 
 ## Citation
 

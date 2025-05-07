@@ -6,7 +6,7 @@
 \usage{
 \method{plot}{saenet}(
   x,
-  type = c("coefficients", "cv.error"),
+  type = c("coefficients", "criterion.value"),
   iteration = NULL,
   top_n = NULL,
   max_name_length = 20,
@@ -21,13 +21,13 @@
   \item `"coefficients"`: (Default) Plots the non-zero coefficient values from a
         specified iteration. Uses a horizontal barplot for fewer than or equal to 50
         coefficients and a dotchart for more than 50.
-  \item `"cv.error"`: Plots the mean cross-validation error against the
+  \item `"criterion.value"`: Plots the mean cross-validation error against the
         iteration number.
 }}
 
 \item{iteration}{Integer. The iteration number from the SAEnet fit to use for
 plotting coefficients. Defaults to the final iteration (`x$num_iterations`).
-Not used if `type = "cv.error"`.}
+Not used if `type = "criterion.value"`.}
 
 \item{top_n}{Integer or NULL. For `type = "coefficients"`, specifies the maximum
 number of non-zero variables to display, ordered by the absolute value of their
@@ -85,7 +85,7 @@ if (requireNamespace("stats", quietly = TRUE) && exists("saenet")) {
     plot(fit_example, type = "coefficients", top_n = 5)
 
     # Plot CV error across iterations
-    plot(fit_example, type = "cv.error")
+    plot(fit_example, type = "criterion.value")
   } else {
     message("Skipping plot.saenet examples as saenet() function or
     its dependencies are not fully available or failed.")

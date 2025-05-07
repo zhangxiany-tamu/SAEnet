@@ -20,7 +20,7 @@ print.saenet <- function(x, ...) {
   if (!is.na(x$gamma[length(x$gamma)])) {
     cat("Gamma:", x$gamma[length(x$gamma)], "\n")
   }
-  cat("CV error:", x$cv_errors[length(x$cv_errors)], "\n")
+  cat("CV error:", x$criterion_value[length(x$criterion_value)], "\n")
 
   # Return invisibly
   invisible(x)
@@ -77,12 +77,12 @@ predict.saenet <- function(object, newx, type = c("response", "coefficients"), i
 #'     \item `"coefficients"`: (Default) Plots the non-zero coefficient values from a
 #'           specified iteration. Uses a horizontal barplot for fewer than or equal to 50
 #'           coefficients and a dotchart for more than 50.
-#'     \item `"cv.error"`: Plots the mean cross-validation error against the
+#'     \item `"criterion.value"`: Plots the mean cross-validation error against the
 #'           iteration number.
 #'   }
 #' @param iteration Integer. The iteration number from the SAEnet fit to use for
 #'   plotting coefficients. Defaults to the final iteration (`x$num_iterations`).
-#'   Not used if `type = "cv.error"`.
+#'   Not used if `type = "criterion.value"`.
 #' @param top_n Integer or NULL. For `type = "coefficients"`, specifies the maximum
 #'   number of non-zero variables to display, ordered by the absolute value of their
 #'   coefficients. If NULL (default), all non-zero coefficients are plotted.
@@ -135,7 +135,7 @@ predict.saenet <- function(object, newx, type = c("response", "coefficients"), i
 #'     plot(fit_example, type = "coefficients", top_n = 5)
 #'
 #'     # Plot CV error across iterations
-#'     plot(fit_example, type = "cv.error")
+#'     plot(fit_example, type = "criterion.value")
 #'   } else {
 #'     message("Skipping plot.saenet examples as saenet() function or
 #'     its dependencies are not fully available or failed.")
@@ -144,7 +144,7 @@ predict.saenet <- function(object, newx, type = c("response", "coefficients"), i
 #'   message("Skipping plot.saenet examples: 'stats' package or 'saenet' function not available.")
 #' }
 #'
-plot.saenet <- function(x, type = c("coefficients", "cv.error"), iteration = NULL,
+plot.saenet <- function(x, type = c("coefficients", "criterion.value"), iteration = NULL,
                         top_n = NULL, max_name_length = 20, ...) {
   # Validate input type
   type <- match.arg(type)
@@ -269,26 +269,26 @@ plot.saenet <- function(x, type = c("coefficients", "cv.error"), iteration = NUL
       graphics::box() # Redraw box around plot
     }
 
-  } else if (type == "cv.error") {
+  } else if (type == "criterion.value") {
     # Plot CV error across iterations
     # Iterations are 0-indexed in the algorithm, results stored 1-indexed
     iterations_to_plot <- 0:x$num_iterations
 
-    if (length(x$cv_errors) != (x$num_iterations + 1)) {
-      message("Length of cv_errors does not match num_iterations. Plotting available errors.")
-      # Adjust iterations_to_plot if cv_errors is shorter (e.g. early stop not fully implemented)
-      iterations_to_plot <- 0:(length(x$cv_errors)-1)
+    if (length(x$criterion_value) != (x$num_iterations + 1)) {
+      message("Length of criterion_value does not match num_iterations. Plotting available errors.")
+      # Adjust iterations_to_plot if criterion_value is shorter (e.g. early stop not fully implemented)
+      iterations_to_plot <- 0:(length(x$criterion_value)-1)
       if(length(iterations_to_plot) == 0) {
         message("No CV errors to plot.")
         return(invisible(x))
       }
     }
-    cv_errors_to_plot <- x$cv_errors[1:length(iterations_to_plot)]
+    criterion_value_to_plot <- x$criterion_value[1:length(iterations_to_plot)]
 
 
     graphics::par(mar = c(5, 4, 4, 2) + 0.1) # Default margins often fine here
 
-    graphics::plot(iterations_to_plot, cv_errors_to_plot,
+    graphics::plot(iterations_to_plot, criterion_value_to_plot,
                    type = "b", # Both points and lines
                    pch = 16,
                    xlab = "Iteration Number",
@@ -304,10 +304,10 @@ plot.saenet <- function(x, type = c("coefficients", "cv.error"), iteration = NUL
     graphics::grid(nx = NA, ny = NULL, lty = 2, col = grDevices::adjustcolor("gray", alpha.f = 0.5)) # Horizontal grid lines
 
     # Highlight the iteration with the minimum CV error
-    if(any(is.finite(cv_errors_to_plot))){
-      min_cv_error_idx <- which.min(cv_errors_to_plot)
+    if(any(is.finite(criterion_value_to_plot))){
+      min_cv_error_idx <- which.min(criterion_value_to_plot)
       best_iteration_val <- iterations_to_plot[min_cv_error_idx]
-      min_cv_error_val <- cv_errors_to_plot[min_cv_error_idx]
+      min_cv_error_val <- criterion_value_to_plot[min_cv_error_idx]
 
       graphics::points(best_iteration_val, min_cv_error_val,
                        col = "firebrick", cex = 2, pch = 16)
