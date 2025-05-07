@@ -438,7 +438,7 @@ The two implementations differ primarily in how they parameterize the elastic ne
 - **saenet (glmnet-based)**: Uses the elastic net mixing parameter $\alpha\in[0,1]$, where:
   - $\alpha=0$ corresponds to ridge regression
   - $\alpha=1$ corresponds to lasso regression
-  - The overall penalty is $\lambda\sum^{p}_{i=1} w_i[\alpha |\beta_i| + (1-\alpha)\beta_i^2]$
+  - The overall penalty is $\lambda\sum^{p}_{i=1} w_i[\alpha |\beta_i| + (1-\alpha)\beta_i^2/2]$
 
 - **saenet2 (gcdnet-based)**: Uses separate L1 and L2 penalties:
   - $\lambda_1$ controls the L1 (lasso) penalty
