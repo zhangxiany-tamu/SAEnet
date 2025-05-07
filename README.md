@@ -435,15 +435,26 @@ The package supports both cross-validation (with "lambda.min" or "lambda.1se" op
 
 The two implementations differ primarily in how they parameterize the elastic net penalty:
 
-| Feature | `saenet` | `saenet2` |
-|---------|----------|-----------|
-| **Backend** | Uses glmnet package | Uses gcdnet package |
-| **Penalty Formula** | $\lambda\sum^{p}_{i=1} w_i[\alpha |\beta_i| + (1-\alpha)\beta_i^2]$ |  $\lambda_1\sum^{p}_{i=1}w_i|\beta_i| + \lambda_2\|\beta\|_2^2$ |
-| **Parameter Range** | α ∈ [0,1] | λ₂ ∈ [0,∞) |
-| **Ridge Regression** | α = 0 | λ₂ = large |
-| **LASSO Regression** | α = 1 | λ₂ = 0 |
-| **Default Parameter** | `alpha_sequence = seq(0, 1, by = 0.1)` | `lambda2_sequence = exp(seq(0, -40, length.out = 50))` |
-| **Returned Parameters** | Contains `alpha` vector | Contains `lambda2` vector |
+- **saenet (glmnet-based)**: Uses the elastic net mixing parameter $\alpha\in[0,1]$, where:
+  - $\alpha=0$ corresponds to ridge regression
+  - $\alpha=1$ corresponds to lasso regression
+  - The overall penalty is $\lambda\sum^{p}_{i=1} w_i[\alpha |\beta_i| + (1-\alpha)\beta_i^2]$
+
+- **saenet2 (gcdnet-based)**: Uses separate L1 and L2 penalties:
+  - $\lambda_1$ controls the L1 (lasso) penalty
+  - $\lambda_2$ controls the L2 (ridge) penalty
+  - The overall penalty is $\lambda_1\sum^{p}_{i=1}w_i|\beta_i| + \lambda_2\|\beta\|_2^2$
+
+### Potential Advantages of saenet (glmnet-based)
+
+- More intuitive parameterization for users familiar with elastic net models
+- Single parameter (α) controls the balance between L1 and L2 penalties
+- Well-established glmnet internal optimizations
+
+### Potential Advantages of saenet2 (gcdnet-based)
+
+- Separate control over L1 and L2 penalty strengths
+- More flexible parameterization for certain problem structures
 
 ## Citation
 
